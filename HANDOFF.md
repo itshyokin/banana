@@ -80,8 +80,10 @@ user's real Reach + Halo 3 Elite node lists to tune auto-matching.
   (not scene props, to avoid update loops). Budgets in `scene.banana_limits`; defaults are
   placeholders (no published Halo 3 limits found), saveable to `<config>/banana/limits.json`.
   Overlay: SpaceView3D POST_PIXEL blf text, toggle in the Limits panel.
-- To verify in Tool: a separate shell object seals together with the terrain (coincident
-  vertices across objects); two seamed BSPs import with `structure-seams`.
+- ✅ Verified in Tool/Sapien (2026-11-17): two rooms joined by a mirrored doorway seam pair up
+  (after the per-BSP seam naming fix).
+- Still to verify: a separate sky shell object seals together with the terrain (coincident
+  vertices across objects); terrain seams from Build Sky Shells.
 
 ## Rig Convert (side tool inside Banana)
 Purpose: put a Reach character body (e.g. Elite) onto the Halo 3 skeleton so Halo 3's existing
