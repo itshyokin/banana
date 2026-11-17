@@ -21,4 +21,14 @@ collection, validate it, and export it as a `.ass` file ready for `tool structur
 
 You can also give any collection a role from the Outliner: right-click > Banana Role.
 
+## Rig Convert
+Banana > **Rig Convert** moves a body skinned to one Halo skeleton (e.g. a Reach Elite) onto
+another (e.g. the Halo 3 Elite):
+1. Import both models with your JMS importer.
+2. Pick the **Reach Rig**, the **Halo 3 Rig**, and optionally the **Halo 3 Body**.
+3. **Auto Map**, fix any rows in the table (Map / Merge into parent / Copy weights from the Halo 3 body),
+   and save it as a preset for next time.
+4. Select the Reach body meshes (or select nothing to use every mesh on the Reach rig) and press
+   **Match to Halo 3**. Use the pose button to bend the limbs and check deformation.
+
 See `HANDOFF.md` for the roadmap and technical notes.

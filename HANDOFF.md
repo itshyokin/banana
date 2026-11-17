@@ -13,6 +13,9 @@ Tool imports with `tool structure`. Named after Halo's monkey-named editors.
 optional Tool run. Headless tests pass (`tests/run_tests.py`). **Not yet tested in real Tool** —
 first job next session is to read the user's Tool output from the box-room test.
 
+**Rig Convert added (v0.2.0)** — see the section below. Tests: `tests/test_rig.py`. Waiting on the
+user's real Reach + Halo 3 Elite node lists to tune auto-matching.
+
 ## Build plan (agreed with the user)
 1. ✅ Exporter + validation (prove the .ASS writer in Tool with a sealed box room)
 2. Sky shell generator, `+seam` generation/mirroring between BSPs, per-BSP limit tracker meters
@@ -38,6 +41,24 @@ first job next session is to read the user's Tool output from the box-room test.
    shader tag existence check, material flag checkboxes, pie menu, build-style presets
 - The user does **not** want a walkable slope overlay.
 
+## Rig Convert (side tool inside Banana)
+Purpose: put a Reach character body (e.g. Elite) onto the Halo 3 skeleton so Halo 3's existing
+collision, physics and animations work, without regrouping vertices by hand.
+- User's workflow: import H3 render model + rig and the Reach body + rig as **JMS with the existing
+  Halo Blender toolset (general-101)**, run Rig Convert, delete the H3 body, re-add armor
+  permutations and parent them themselves, export JMS with the same toolset. Only the render
+  model is replaced; regions and bones must match H3. The user handles permutations.
+- Meshes are edited **in place** (vertex groups, armature modifier, parent only) so the importer's
+  region data survives export.
+- Steps: auto bone map (prefix/side/digit-insensitive + same-side fuzzy match, editable table,
+  JSON presets in Blender config `banana/rig_presets`) -> per bone mode MAP / MERGE (extra bone ->
+  nearest mapped parent) / COPY (take weights from the H3 body by nearest surface) -> conform the
+  shape to the H3 rest pose (joint positions, optionally limb directions) -> normalize + trim to
+  max influences (default 4) -> rebind to the H3 rig, hide the Reach rig.
+- Test Pose toggles bends on keyword bones (upperarm, forearm, thigh, calf, jaw, head...).
+- TODO once real node lists arrive: check auto-map hits, adjust PREFIXES/SIDES in `rig.py`,
+  ship a built-in "Reach Elite -> H3 Elite" preset; confirm H3's real influence limit.
+
 ## Layout
 ```
 banana/__init__.py     bl_info + register
@@ -47,7 +68,9 @@ banana/ass_writer.py   plain-Python ASS v7 model + writer (no bpy)
 banana/export.py       bpy -> ASS (numpy), paths, Tool runner, export operators
 banana/validate.py     validation + red BANANA_PROBLEMS overlay
 banana/ui.py           View3D sidebar > Banana; Outliner collection menu "Banana Role"
-tests/run_tests.py     headless tests (needs a Python with the bpy module)
+banana/rig.py          Rig Convert (bone map, weights, conform, rebind, test pose, presets, panel)
+tests/run_tests.py     headless map/export tests (needs a Python with the bpy module)
+tests/test_rig.py      headless Rig Convert tests
 tools/build_zip.py     builds dist/banana-<version>.zip for Install Add-on
 ```
 
