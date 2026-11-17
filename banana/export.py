@@ -151,7 +151,9 @@ def add_baked(scene, objs, depsgraph, scale_mat, bsp, used_uids, report, force_m
         if not mobj.triangles:
             continue
         scene.objects.append(mobj)
-        name = naming.strip_suffix(obj.name).lstrip("%")
+        if not hasattr(scene, "_names"):
+            scene._names = set()
+        name = naming.structure_name(obj.name, scene._names)
         scene.instances.append(ass_writer.Instance(name, len(scene.objects) - 1, ensure_uid(obj, used_uids)))
 
 

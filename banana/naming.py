@@ -39,3 +39,18 @@ def sky_material(name, sky_index):
     if name == "+sky":
         return "+sky%d" % sky_index
     return name
+
+
+def structure_name(name, used):
+    """Unique, Tool-friendly name for a baked (non-instance) object:
+    'Cube_A.001' -> 'Cube_A_001'; leading '%' removed; repeats get a counter."""
+    match = _BLENDER_SUFFIX.search(name)
+    if match:
+        name = name[:match.start()] + "_" + match.group(1)
+    name = name.lstrip("%").replace(".", "_") or "object"
+    base, n = name, 1
+    while name in used:
+        n += 1
+        name = "%s_%d" % (base, n)
+    used.add(name)
+    return name
