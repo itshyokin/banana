@@ -54,14 +54,18 @@ _state = {"last_change": 0.0, "timer": False, "all_dirty": True}
 
 def _object_stats(obj, depsgraph):
     eval_obj = obj.evaluated_get(depsgraph)
-    mesh = eval_obj.data
-    n_polys = len(mesh.polygons)
-    loop_total = np.empty(n_polys, np.int32)
-    mesh.polygons.foreach_get("loop_total", loop_total)
-    tris = int(loop_total.sum() - 2 * n_polys) if n_polys else 0
-    mats = tuple(s.material.name for s in eval_obj.material_slots if s.material)
-    corners = [obj.matrix_world @ Vector(c) for c in eval_obj.bound_box]
-    return tris, len(mesh.vertices), mats, corners
+    mesh = eval_obj.to_mesh()  # safe in Edit Mode too, unlike reading eval_obj.data
+    try:
+        n_polys = len(mesh.polygons)
+        loop_total = np.empty(n_polys, np.int32)
+        mesh.polygons.foreach_get("loop_total", loop_total)
+        tris = int(loop_total.sum() - 2 * n_polys) if n_polys else 0
+        n_verts = len(mesh.vertices)
+    finally:
+        eval_obj.to_mesh_clear()
+    mats = tuple(s.material.name for s in obj.material_slots if s.material)
+    corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+    return tris, n_verts, mats, corners
 
 
 def _stats(obj, depsgraph):

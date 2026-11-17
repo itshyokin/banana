@@ -13,7 +13,7 @@ Tool imports with `tool structure`. Named after Halo's monkey-named editors.
 optional Tool run. Headless tests pass (`tests/run_tests.py`). **Verified in real Tool:** a cube
 exported by Banana imported with Tool and loaded in Sapien/game (2026-11-17). Next: phase 2.
 
-**Phase 2 done (v0.3.0):** sky shells with automatic seams, border alignment check, seam mirroring
+**Phase 2 done (v0.3.1, crash fix):** sky shells with automatic seams, border alignment check, seam mirroring
 with auto-sync, seam pair validation, live per-BSP limit meters (+ optional viewport overlay).
 Tests: `tests/test_phase2.py`. Next: phase 3 (height brush + blend-map painting).
 
@@ -110,6 +110,18 @@ tests/test_rig.py      headless Rig Convert tests
 tests/test_phase2.py   headless sky shell / seam / meter tests
 tools/build_zip.py     builds dist/banana-<version>.zip for Install Add-on
 ```
+
+## Lessons learned (bugs that reached the user)
+- **v0.3.0 crash:** Mirror Seam stored materials taken from an *evaluated* object
+  (`eval_obj.material_slots[i].material` is the depsgraph's temporary copy). The next evaluation
+  (Validate) freed it -> Blender crashed. Rule: never store evaluated IDs on real data; use
+  `.original`. Headless tests don't redraw, so they didn't catch it — there's now a regression
+  check (`is_evaluated`) in `tests/test_phase2.py`.
+- Also avoid creating/removing datablocks while holding evaluated objects (append with
+  `bm.from_mesh` + `bmesh.ops.transform` instead of `mesh.copy()`), and read evaluated meshes via
+  `to_mesh()`/`to_mesh_clear()` rather than `eval_obj.data` (Edit Mode safety).
+- Installing a new zip over a running Blender kept old submodules (the user's Sky & Seams box was
+  missing). `__init__.py` now reloads all submodules when Blender reloads the package.
 
 ## Conventions in the code
 - A BSP is a collection with `collection.banana.role == 'BSP'`; children carry roles

@@ -51,12 +51,12 @@ def check_structure(context, bsp, objs, res):
             missing = _faces_without_material(eval_obj, mesh)
             if missing:
                 res.add('ERROR', "%d faces have no material" % missing, obj.name, missing)
-            temp = mesh.copy()
-            temp.transform(obj.matrix_world)
+            before_v = len(bm.verts)
             before = len(bm.faces)
-            bm.from_mesh(temp)
-            bpy.data.meshes.remove(temp)
+            bm.from_mesh(mesh)
+            bm.verts.ensure_lookup_table()
             bm.faces.ensure_lookup_table()
+            bmesh.ops.transform(bm, matrix=obj.matrix_world, verts=bm.verts[before_v:])
             for face in bm.faces[before:]:
                 face[src] = index
         finally:

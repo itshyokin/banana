@@ -39,10 +39,10 @@ def _world_bmesh(context, objs, weld):
         eval_obj = obj.evaluated_get(depsgraph)
         mesh = eval_obj.to_mesh()
         try:
-            temp = mesh.copy()
-            temp.transform(obj.matrix_world)
-            bm.from_mesh(temp)
-            bpy.data.meshes.remove(temp)
+            before = len(bm.verts)
+            bm.from_mesh(mesh)
+            bm.verts.ensure_lookup_table()
+            bmesh.ops.transform(bm, matrix=obj.matrix_world, verts=bm.verts[before:])
         finally:
             eval_obj.to_mesh_clear()
     if bm.verts:
@@ -309,7 +309,8 @@ def sync_seam_partner(context, partner):
         verts = [tuple(mw @ v.co) for v in mesh.vertices]
         tris = [tuple(reversed(t.vertices)) for t in mesh.loop_triangles]
         mats = [t.material_index for t in mesh.loop_triangles]
-        slots = [s.material for s in eval_obj.material_slots]
+        # .original: never store the depsgraph's temporary copies (they get freed -> crash)
+        slots = [s.material.original if s.material else None for s in eval_obj.material_slots]
     finally:
         eval_obj.to_mesh_clear()
     new = bpy.data.meshes.new(partner.name)

@@ -148,6 +148,8 @@ def test_mirror_seam():
     partner = [o for o in bsp_mod.objects_for_role(b, 'STRUCTURE') if o.get(sky.SEAM_SOURCE_KEY)]
     check(len(partner) == 1, "partner made in the other BSP")
     check(not sky.check_seams(ctx, [a, b]), "mirrored seam matches and faces the other way")
+    mats = partner[0].data.materials
+    check(all(m is not None and not m.is_evaluated for m in mats), "partner uses the real material, not a temporary copy (crash fix)")
 
     door.location.y = 1.0  # move the original; export re-syncs the partner
     bpy.ops.banana.export(all_bsps=True)
