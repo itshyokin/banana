@@ -1,4 +1,4 @@
-"""Headless tests for terrain tiles, height brush setup, border matching and blend maps:
+"""Headless tests for terrain BSPs, the terrain brush math and blend maps:
 python tests/test_phase3.py"""
 
 import os
@@ -7,10 +7,11 @@ import tempfile
 
 import bpy
 import numpy as np
+from mathutils import Vector
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import banana  # noqa: E402
-from banana import blendmap, bsp as bsp_mod, export, sky, terrain, validate  # noqa: E402
+from banana import blendmap, brush, bsp as bsp_mod, export, sky, terrain, validate  # noqa: E402
 
 FAILS = []
 
@@ -32,149 +33,167 @@ def reset():
     return s
 
 
-def activate(obj):
+def select(active, *others):
     for o in bpy.context.selected_objects:
         o.select_set(False)
-    if obj is not None:
-        obj.select_set(True)
-    bpy.context.view_layer.objects.active = obj
+    for o in (active,) + others:
+        if o is not None:
+            o.select_set(True)
+    bpy.context.view_layer.objects.active = active
+
+
+def errors(res):
+    return [i for i in res.items if i[0] == 'ERROR']
 
 
 def border_heights(obj):
-    import bmesh
-    bm = bmesh.new()
-    bm.from_mesh(obj.data)
-    idx = {v.index for e in bm.edges if len(e.link_faces) == 1 for v in e.verts}
-    bm.free()
     mw = obj.matrix_world
-    return {terrain._key((mw @ obj.data.vertices[i].co).x, (mw @ obj.data.vertices[i].co).y): (mw @ obj.data.vertices[i].co).z for i in idx}
+    out = {}
+    for i in terrain.border_indices(obj.data):
+        w = mw @ obj.data.vertices[i].co
+        out[terrain._key(w.x, w.y)] = w.z
+    return out
 
 
-def test_tiles_and_borders():
-    print("tiles, border lock, match borders, sealing across BSPs")
+def test_terrain_bsps():
+    print("terrain BSPs, sky, match edge, generate seam")
     s = reset()
     ctx = bpy.context
-    a = bsp_mod.create_bsp(ctx.scene, "bsp_a")
-    b = bsp_mod.create_bsp(ctx.scene, "bsp_b")
-    s.active_bsp = a
-    activate(None)
-    check(bpy.ops.banana.new_tile('EXEC_DEFAULT', size_x=20, size_y=20, spacing=2, next_to_selected=False) == {'FINISHED'}, "first tile")
-    t1 = ctx.active_object
-    check(terrain.is_terrain(t1) and len(t1.data.polygons) == 100, "10x10 grid of quads")
-    check(t1.data.polygons[0].normal.z > 0.99, "normals point up")
-    check(t1.data.materials[0].name == "terrain", "uses the BSP's terrain shader material")
+    select(None)
+    check(bpy.ops.banana.new_terrain('EXEC_DEFAULT', name="terrain_a", size_x=20, size_y=20, spacing=2,
+                                     next_to_selected=False) == {'FINISHED'}, "new terrain BSP")
+    a_obj = ctx.active_object
+    a = bsp_mod.bsp_of(a_obj, ctx.scene)
+    check(a is not None and a.name == "terrain_a" and s.active_bsp == a, "it is its own BSP and becomes active")
+    check(len(a_obj.data.polygons) == 100 and a_obj.data.polygons[0].normal.z > 0.99, "10x10 tile, normals up")
+    check(any(o.get(sky.SHELL_KEY) for o in bsp_mod.objects_for_role(a, 'STRUCTURE')), "came with a sky shell")
+    check(not errors(validate.validate_bsp(ctx, a)), "sealed right away")
 
-    # raise the east border, then add a tile to the east in the other BSP
-    for v in t1.data.vertices:
+    # raise A's east edge, then add B to the east
+    for v in a_obj.data.vertices:
         if v.co.x > 9.99:
             v.co.z = 1.0 + 0.1 * v.co.y
-    t1.data.update()
-    s.active_bsp = b
-    activate(t1)
-    bpy.ops.banana.new_tile('EXEC_DEFAULT', size_x=30, size_y=20, spacing=2, next_to_selected=True, side='+X')
-    t2 = ctx.active_object
-    check(abs(t2.location.x - 25.0) < 1e-6, "placed edge to edge (x = %.2f)" % t2.location.x)
-    check(t2.name in bsp_mod.sub_collections(b, 'STRUCTURE')[0].objects, "went into bsp_b")
-    h1, h2 = border_heights(t1), border_heights(t2)
-    shared = set(h1) & set(h2)
-    check(len(shared) == 11 and all(abs(h1[k] - h2[k]) < 1e-6 for k in shared), "shared border: 11 vertices, same heights")
+    a_obj.data.update()
+    select(a_obj)
+    bpy.ops.banana.new_terrain('EXEC_DEFAULT', name="terrain_b", size_x=30, size_y=20, spacing=2,
+                               next_to_selected=True, side='+X')
+    b_obj = ctx.active_object
+    b = bsp_mod.bsp_of(b_obj, ctx.scene)
+    check(b.name == "terrain_b" and abs(b_obj.location.x - 25.0) < 1e-6, "second terrain BSP placed edge to edge")
+    ha, hb = border_heights(a_obj), border_heights(b_obj)
+    shared = set(ha) & set(hb)
+    check(len(shared) == 11 and all(abs(ha[k] - hb[k]) < 1e-6 for k in shared), "shared edge lined up, heights copied")
+    check(not errors(validate.validate_bsp(ctx, b)), "new BSP sealed by its own sky")
+    check(not sky.seam_triangles(ctx, a) and not sky.seam_triangles(ctx, b), "no seam until asked")
 
-    # border mask
-    mask = terrain.border_mask(t1.data, rings=2)
-    check(abs(mask.max() - 1.0) < 1e-6 and abs(sorted(set(np.round(mask, 3)))[1] - 0.333) < 1e-3, "mask: 1 on border, fading over 2 rings")
-    interior = [i for i, v in enumerate(t1.data.vertices) if abs(v.co.x) < 3 and abs(v.co.y) < 3]
-    check(all(mask[i] == 0 for i in interior), "interior unmasked")
+    # knock B's edge out of place, Match Edge puts it back
+    b_obj.data.vertices[0].co.x += 0.3   # south-west corner is on the shared edge
+    b_obj.data.vertices[0].co.z += 2.0
+    b_obj.data.update()
+    select(a_obj, b_obj)
+    bpy.ops.banana.match_edge(tolerance=1.0)
+    ha, hb = border_heights(a_obj), border_heights(b_obj)
+    shared = set(ha) & set(hb)
+    check(len(shared) == 11 and all(abs(ha[k] - hb[k]) < 1e-6 for k in shared), "Match Edge snapped position and height")
 
-    # height brush mode setup (brush switching needs a real 3D view; locks and mask are what matter)
-    ts = ctx.tool_settings.sculpt
-    ts.lock_x = ts.lock_y = False
-    activate(t1)
-    bpy.ops.banana.height_brush(brush='DRAW')
-    check(t1.mode == 'SCULPT' and ts.lock_x and ts.lock_y, "sculpt mode with X/Y locked")
-    m = t1.data.attributes.get(terrain.MASK_ATTR)
-    check(m is not None and max(d.value for d in m.data) == 1.0, "border mask applied")
-    bpy.ops.banana.done_sculpting()
-    check(t1.mode == 'OBJECT' and not ts.lock_x and not ts.lock_y, "done: object mode, locks restored")
-    check(t1.data.attributes.get(terrain.MASK_ATTR) is None, "mask cleared")
-
-    # break the border, match it back
-    t2.data.vertices[0].co.z += 0.5  # south-west corner sits on the shared border
-    t2.data.update()
-    activate(t1)
-    moved = terrain.match_borders(ctx.scene, prefer=t1)
-    h1, h2 = border_heights(t1), border_heights(t2)
-    check(moved == 1 and all(abs(h1[k] - h2[k]) < 1e-6 for k in set(h1) & set(h2)), "match borders fixes the height (%d moved)" % moved)
-
-    bpy.ops.banana.build_sky_shell(all_bsps=True)
+    select(a_obj, b_obj)
+    check(bpy.ops.banana.generate_seam() == {'FINISHED'}, "Generate Seam runs")
+    check(len(sky.seam_triangles(ctx, a)) == 20 and len(sky.seam_triangles(ctx, b)) == 20, "10 seam segments on each side")
+    check(not sky.check_seams(ctx, [a, b]), "seam pair matches")
     for bsp in (a, b):
-        res = validate.validate_bsp(ctx, bsp)
-        errs = [i for i in res.items if i[0] == 'ERROR']
-        check(not errs, "%s sealed with its shell: %s" % (bsp.name, errs))
-    check(not sky.check_seams(ctx, [a, b]) and not sky.check_border_alignment(ctx, [a, b]), "tiles seam together across BSPs")
+        check(not errors(validate.validate_bsp(ctx, bsp)), "%s still sealed" % bsp.name)
+    written, _r = export.export_bsp(ctx, a)
+    check('"+seam:terrain_a"' in open(written[0]).read(), "exports +seam:terrain_a")
+
+    # a third terrain north of A keeps A's seam with B when joined
+    select(a_obj)
+    bpy.ops.banana.new_terrain('EXEC_DEFAULT', name="terrain_c", size_x=20, size_y=20, spacing=2,
+                               next_to_selected=True, side='+Y')
+    c_obj = ctx.active_object
+    select(a_obj, c_obj)
+    bpy.ops.banana.generate_seam()
+    c = bsp_mod.bsp_of(c_obj, ctx.scene)
+    check(not sky.check_seams(ctx, [a, b, c]), "A keeps its seam with B after joining C")
 
 
-def test_blend_map():
-    print("blend map")
+def test_height_dab():
+    print("set height brush math")
+    reset()
+    obj = terrain.make_tile("t", 20, 20, 1, Vector((5, 0, 2)))
+    bpy.context.scene.collection.objects.link(obj)
+    bpy.context.view_layer.update()
+    mask = brush.border_mask(obj.data, rings=2)
+    check(mask.max() == 1.0 and abs(sorted(set(np.round(mask, 3)))[1] - 0.333) < 1e-3, "border mask fades over 2 rings")
+    for _ in range(40):
+        brush.height_dab(obj, (5, 0), 4.0, 7.0, 0.5, mask)
+    mw = obj.matrix_world
+    center = min(obj.data.vertices, key=lambda v: (v.co.x) ** 2 + (v.co.y) ** 2)
+    check(abs((mw @ center.co).z - 7.0) < 1e-3, "center reaches the target height (world Z, object at z=2)")
+    far = [v for v in obj.data.vertices if (Vector((v.co.x, v.co.y)).length > 4.01)]
+    check(all(abs((mw @ v.co).z - 2.0) < 1e-6 for v in far), "nothing outside the radius moves")
+    xs = sorted({round((mw @ v.co).x, 4) for v in obj.data.vertices})
+    check(len(xs) == 21, "X/Y never move")
+    brush.height_dab(obj, (-5, 0), 4.0, 7.0, 1.0, mask)  # radius reaches the west border at x = -5
+    edge = [v for v in obj.data.vertices if abs((mw @ v.co).x + 5.0) < 1e-4]
+    check(all(abs((mw @ v.co).z - 2.0) < 1e-6 for v in edge), "locked border doesn't move")
+
+
+def test_blend_brush_and_preview():
+    print("blend brush, blur, preview textures, bake")
     s = reset()
     ctx = bpy.context
-    a = bsp_mod.create_bsp(ctx.scene, "bsp_a")
-    s.active_bsp = a
-    a.banana.blend_resolution = 64
-    activate(None)
-    bpy.ops.banana.new_tile('EXEC_DEFAULT', size_x=40, size_y=20, spacing=4, next_to_selected=False)
-    tile = ctx.active_object
-    check(bpy.ops.banana.blend_setup() == {'FINISHED'}, "setup runs")
-    uv = tile.data.uv_layers[0]
-    check(uv.name == "blend_uv", "blend_uv is the first UV map")
-    us = [d.uv[0] for d in uv.data]
-    vs = [d.uv[1] for d in uv.data]
-    check(abs(min(us)) < 1e-5 and abs(max(us) - 1) < 1e-5 and abs(min(vs)) < 1e-5 and abs(max(vs) - 1) < 1e-5, "UVs span 0-1")
-    mat = tile.data.materials[0]
-    check(mat.name == "terrain" and any(n.name.startswith("BANANA_mix") for n in mat.node_tree.nodes), "preview nodes in the terrain material")
-    check(all(bpy.data.images.get("bsp_a_layer%d" % n) for n in (2, 3, 4)), "three paint layers")
+    select(None)
+    bpy.ops.banana.new_terrain('EXEC_DEFAULT', name="terrain_a", size_x=40, size_y=40, spacing=4, next_to_selected=False)
+    bsp = s.active_bsp
+    bsp.banana.blend_resolution = 64
+    check(bpy.ops.banana.blend_setup() == {'FINISHED'}, "blend setup")
+    layers, images = brush.read_layers(bsp)
+    check(set(layers) == {2, 3, 4} and layers[2].shape == (64, 64), "layers read as 64x64 arrays")
 
-    # paint: layer 2 on the left half, layer 4 in the bottom-left quarter
-    def paint(n, fn):
-        img = bpy.data.images["bsp_a_layer%d" % n]
-        w, h = img.size
-        px = np.zeros((h, w, 4), np.float32)
-        px[..., 3] = 1
-        for y in range(h):
-            for x in range(w):
-                if fn(x / w, y / h):
-                    px[y, x, :3] = 1
-        img.pixels.foreach_set(px.ravel())
-    paint(2, lambda u, v: u < 0.5)
-    paint(4, lambda u, v: u < 0.25 and v < 0.25)
+    brush.blend_dab(layers, 16, 32, 8, 4, 'PAINT', 1.0)
+    check(layers[4][32, 16] > 0.97, "paint layer 4")
+    brush.blend_dab(layers, 16, 32, 8, 2, 'PAINT', 1.0)
+    check(layers[2][32, 16] > 0.97 and layers[4][32, 16] < 0.03, "painting layer 2 over it shows layer 2")
+    brush.blend_dab(layers, 16, 32, 8, 1, 'PAINT', 1.0)
+    check(max(layers[n][32, 16] for n in (2, 3, 4)) < 0.03, "painting layer 1 brings the base back")
+    brush.blend_dab(layers, 48, 32, 10, 3, 'PAINT', 0.3)
+    v = layers[3][32, 48]
+    check(0.25 < v < 0.35, "opacity 0.3 gives a partial layer (%.2f)" % v)
+    for n in (2, 3, 4):
+        layers[n][:] = 0
+    layers[3][:, 32:] = 1.0  # hard edge down the middle
+    brush.blend_dab(layers, 32, 32, 8, 2, 'BLUR', 1.0)
+    check(0.2 < layers[3][32, 31] < 0.8 and 0.2 < layers[3][32, 32] < 0.8, "blur softens the edge")
+    check(layers[3][32, 60] == 1.0 and layers[3][32, 2] == 0.0, "blur stays inside the brush")
+    brush.write_layers(layers, images)
 
-    # paint layer operator picks the right slot
-    activate(tile)
-    bpy.ops.banana.paint_layer(layer=3)
-    images = list(mat.texture_paint_images)
-    check(tile.mode == 'TEXTURE_PAINT' and images and images[mat.paint_active_slot].name == "bsp_a_layer3", "paint layer 3 is the active slot")
-    bpy.ops.object.mode_set(mode='OBJECT')
+    # preview texture on layer 3: nodes appear, export is still plain RGBA
+    tex = bpy.data.images.new("rock_preview", 8, 8)
+    bsp.banana.layer3_image = tex
+    bsp.banana.layer3_tile = 10.0
+    mat = bpy.data.materials[bsp.banana.terrain_material]
+    nodes = mat.node_tree.nodes
+    check(nodes.get("BANANA_tex3") is not None and nodes["BANANA_tex3"].image == tex, "layer 3 shows its preview texture")
+    scale = tuple(round(x, 3) for x in nodes["BANANA_map3"].inputs["Scale"].default_value)
+    check(scale == (4.0, 4.0, 1.0), "tiles every 10 m over the 40 m area %s" % (scale,))
+    check(nodes.get("BANANA_color3") is None and nodes.get("BANANA_color2") is not None, "other layers keep flat colors")
 
-    written, report = export.export_bsp(ctx, a)
-    path = report.blend_map
-    check(path and path.endswith(os.path.join("bitmaps", "bsp_a_blend.tif")) and os.path.exists(path), "export writes bitmaps/bsp_a_blend.tif")
-    img = bpy.data.images.load(path, check_existing=False)
+    written, report = export.export_bsp(ctx, bsp)
+    img = bpy.data.images.load(report.blend_map, check_existing=False)
     img.alpha_mode = 'STRAIGHT'
     img.colorspace_settings.name = 'Non-Color'
-    w, h = img.size
-    px = np.empty(w * h * 4, np.float32)
+    px = np.empty(64 * 64 * 4, np.float32)
     img.pixels.foreach_get(px)
-    px = px.reshape(h, w, 4)
-
-    def at(u, v):
-        return tuple(round(float(c), 2) for c in px[int(v * h), int(u * w)])
-    check(at(0.75, 0.75) == (1.0, 0.0, 0.0, 0.0), "base only -> R (%s)" % (at(0.75, 0.75),))
-    check(at(0.4, 0.75) == (0.0, 1.0, 0.0, 0.0), "layer 2 -> G (%s)" % (at(0.4, 0.75),))
-    check(at(0.1, 0.1) == (0.0, 0.0, 0.0, 1.0), "layer 4 over layer 2 -> A (%s)" % (at(0.1, 0.1),))
-    check(abs(px.sum(axis=2) - 1).max() < 0.02, "channels add up to 1 everywhere")
+    px = px.reshape(64, 64, 4)
+    check(tuple(np.round(px[32, 60], 2)) == (0.0, 0.0, 1.0, 0.0), "layer 3 -> B in the bake")
+    check(tuple(np.round(px[10, 2], 2)) == (1.0, 0.0, 0.0, 0.0), "base -> R in the bake")
+    check(abs(px.sum(axis=2) - 1).max() < 0.02, "channels add up to 1")
+    check(bpy.data.materials[bsp.banana.terrain_material].name == "terrain", "material name (shader) unchanged")
 
 
 if __name__ == "__main__":
-    test_tiles_and_borders()
-    test_blend_map()
+    test_terrain_bsps()
+    test_height_dab()
+    test_blend_brush_and_preview()
     print("\n%s" % ("ALL PASSED" if not FAILS else "%d FAILED" % len(FAILS)))
     sys.exit(1 if FAILS else 0)

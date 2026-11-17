@@ -1,29 +1,37 @@
-"""Terrain tiles and the height brush.
+"""Terrain BSPs.
 
-- New Terrain Tile: a flat grid in the active BSP's structure, optionally placed
-  against another tile so the shared border matches vertex for vertex (and copies
-  that border's heights).
-- Height brush: Blender's sculpt brushes, but X and Y are locked so only height
-  changes, and every terrain border is masked so seams and the sky shell stay
-  sealed. Done Sculpting puts your sculpt settings back.
-- Match Borders: makes heights identical wherever two BSPs' terrain borders share
-  a vertex position.
+Every terrain is its own BSP: New Terrain BSP makes the BSP collection, a flat
+grid tile and a sky shell over it. Placed next to a selected terrain, the shared
+edge lines up vertex for vertex.
+
+With two terrain BSPs selected:
+- Match Edge snaps the other terrain's edge onto the active terrain's edge
+  (position and height), like edge matching in the Titamas add-on.
+- Generate Seam matches the edge, then rebuilds both sky shells so the shared
+  edge becomes a +seam pair instead of two sky walls.
 """
 
 import bpy
 import bmesh
 import numpy as np
-from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, StringProperty
 from mathutils import Vector
+from mathutils.kdtree import KDTree
 
 from . import bsp as bsp_mod
 
 TILE_KEY = "banana_tile"   # {"size_x", "size_y", "spacing"}
-MASK_ATTR = ".sculpt_mask"
 
 
 def is_terrain(obj):
-    return obj.type == 'MESH' and obj.get(TILE_KEY) is not None
+    return obj is not None and obj.type == 'MESH' and obj.get(TILE_KEY) is not None
+
+
+def terrain_of(bsp):
+    for obj in bsp_mod.objects_for_role(bsp, 'STRUCTURE'):
+        if is_terrain(obj):
+            return obj
+    return None
 
 
 def all_terrain(scene):
@@ -37,6 +45,14 @@ def all_terrain(scene):
 
 def _key(x, y):
     return (round(x, 4), round(y, 4))
+
+
+def border_indices(mesh):
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    idx = sorted({v.index for e in bm.edges if len(e.link_faces) == 1 for v in e.verts})
+    bm.free()
+    return idx
 
 
 # ------------------------------------------------------------------ tiles
@@ -62,43 +78,75 @@ def make_tile(name, size_x, size_y, spacing, location, material=None):
     return obj
 
 
-def copy_border_heights(obj, neighbor):
-    """Give obj's border vertices the heights of neighbor's vertices at the same XY."""
-    nmw = neighbor.matrix_world
-    heights = {}
-    for v in neighbor.data.vertices:
-        w = nmw @ v.co
-        heights[_key(w.x, w.y)] = w.z
-    mw, inv = obj.matrix_world, obj.matrix_world.inverted()
-    count = 0
-    for v in obj.data.vertices:
-        w = mw @ v.co
-        z = heights.get(_key(w.x, w.y))
-        if z is not None:
-            v.co = inv @ Vector((w.x, w.y, z))
-            count += 1
-    obj.data.update()
-    return count
+def match_edge(target, source, tolerance):
+    """Snap source's border vertices onto the nearest target border vertex (x, y and z)
+    when it's within `tolerance` sideways. Returns how many moved."""
+    t_idx = border_indices(target.data)
+    if not t_idx:
+        return 0
+    tmw = target.matrix_world
+    pts = [tmw @ target.data.vertices[i].co for i in t_idx]
+    tree = KDTree(len(pts))
+    for k, p in enumerate(pts):
+        tree.insert(Vector((p.x, p.y, 0.0)), k)  # search in XY only
+    tree.balance()
+    smw = source.matrix_world
+    inv = smw.inverted()
+    moved = 0
+    for i in border_indices(source.data):
+        w = smw @ source.data.vertices[i].co
+        _co, k, dist = tree.find(Vector((w.x, w.y, 0.0)))
+        if k is None or dist > tolerance:
+            continue
+        if (pts[k] - w).length > 1e-7:
+            source.data.vertices[i].co = inv @ pts[k]
+            moved += 1
+    source.data.update()
+    return moved
+
+
+def _two_terrains(context):
+    """(active terrain, other terrain) from the selection, in two different BSPs."""
+    active = context.active_object
+    picked = [o for o in context.selected_objects if is_terrain(o)]
+    if not is_terrain(active) or len(picked) != 2:
+        return None, None, "Select two terrain tiles (the active one is kept as is)"
+    other = picked[0] if picked[1] is active else picked[1]
+    a_bsp = bsp_mod.bsp_of(active, context.scene)
+    b_bsp = bsp_mod.bsp_of(other, context.scene)
+    if a_bsp is None or b_bsp is None or a_bsp is b_bsp:
+        return None, None, "The two terrains must be in two different BSPs"
+    return active, other, None
 
 
 SIDES = (('+X', "East (+X)", ""), ('-X', "West (-X)", ""), ('+Y', "North (+Y)", ""), ('-Y', "South (-Y)", ""))
 
 
-class BANANA_OT_new_tile(bpy.types.Operator):
-    """Add a flat terrain tile to the active BSP; next to the selected tile, its shared border matches exactly"""
-    bl_idname = "banana.new_tile"
-    bl_label = "New Terrain Tile"
+class BANANA_OT_new_terrain(bpy.types.Operator):
+    """Create a new terrain BSP: a flat tile with its own sky shell. Next to a selected terrain, the edges line up"""
+    bl_idname = "banana.new_terrain"
+    bl_label = "New Terrain BSP"
     bl_options = {'REGISTER', 'UNDO'}
 
+    name: StringProperty(name="BSP Name", default="")
     size_x: FloatProperty(name="Size X", default=100.0, min=1.0, subtype='DISTANCE')
     size_y: FloatProperty(name="Size Y", default=100.0, min=1.0, subtype='DISTANCE')
     spacing: FloatProperty(name="Vertex Spacing", default=2.0, min=0.05, subtype='DISTANCE')
-    next_to_selected: BoolProperty(name="Next to Selected Tile", default=True)
+    next_to_selected: BoolProperty(name="Next to Selected Terrain", default=True)
     side: EnumProperty(name="Side", items=SIDES, default='+X')
 
+    @staticmethod
+    def _default_name(context):
+        existing = {b.name for b in bsp_mod.find_bsps(context.scene)}
+        n = 0
+        while "terrain_%03d" % n in existing:
+            n += 1
+        return "terrain_%03d" % n
+
     def invoke(self, context, event):
+        self.name = self._default_name(context)
         active = context.active_object
-        if active is not None and is_terrain(active):
+        if is_terrain(active):
             info = active[TILE_KEY]
             self.size_x, self.size_y, self.spacing = info["size_x"], info["size_y"], info["spacing"]
         else:
@@ -106,233 +154,115 @@ class BANANA_OT_new_tile(bpy.types.Operator):
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
-        bsp = context.scene.banana.active_bsp
-        if bsp is None:
-            self.report({'ERROR'}, "Pick or create a BSP first")
-            return {'CANCELLED'}
+        from . import sky
         if context.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
         neighbor = context.active_object if self.next_to_selected else None
         if neighbor is not None and not is_terrain(neighbor):
-            self.report({'ERROR'}, "Select a terrain tile to place the new one next to, or untick Next to Selected Tile")
+            self.report({'ERROR'}, "Select a terrain to place the new one next to, or untick Next to Selected Terrain")
             return {'CANCELLED'}
         location = Vector((0.0, 0.0, 0.0))
         if neighbor is not None:
             info = neighbor[TILE_KEY]
             location = neighbor.matrix_world.translation.copy()
-            location.z = neighbor.matrix_world.translation.z
             if self.side in ('+X', '-X'):
-                if abs(self.size_y - info["size_y"]) > 1e-6 or abs(self.spacing - info["spacing"]) > 1e-6:
-                    self.report({'WARNING'}, "Size Y and spacing were matched to the neighbor so the border lines up")
                 self.size_y, self.spacing = info["size_y"], info["spacing"]
                 step = (info["size_x"] + self.size_x) / 2.0
                 location.x += step if self.side == '+X' else -step
             else:
-                if abs(self.size_x - info["size_x"]) > 1e-6 or abs(self.spacing - info["spacing"]) > 1e-6:
-                    self.report({'WARNING'}, "Size X and spacing were matched to the neighbor so the border lines up")
                 self.size_x, self.spacing = info["size_x"], info["spacing"]
                 step = (info["size_y"] + self.size_y) / 2.0
                 location.y += step if self.side == '+Y' else -step
 
+        name = self.name.strip() or self._default_name(context)
+        bsp = bsp_mod.create_bsp(context.scene, name)
         mat_name = bsp.banana.terrain_material or "terrain"
         material = bpy.data.materials.get(mat_name) or bpy.data.materials.new(mat_name)
-        obj = make_tile("%s_terrain" % bsp.name, self.size_x, self.size_y, self.spacing, location, material)
-        structure = bsp_mod.sub_collections(bsp, 'STRUCTURE')
-        (structure[0] if structure else bsp).objects.link(obj)
+        obj = make_tile("%s_ground" % bsp.name, self.size_x, self.size_y, self.spacing, location, material)
+        bsp_mod.sub_collections(bsp, 'STRUCTURE')[0].objects.link(obj)
         context.view_layer.update()
-        matched = copy_border_heights(obj, neighbor) if neighbor is not None else 0
+        if neighbor is not None:
+            match_edge(neighbor, obj, self.spacing * 0.25)
+            context.view_layer.update()
+
+        s = context.scene.banana
+        if s.sky_height_auto:
+            s.sky_height = sky.auto_sky_height(context)
+        _shell, msgs = sky.build_shell(context, bsp, s.sky_height, neighbors=[])
+        s.active_bsp = bsp
         for other in context.selected_objects:
             other.select_set(False)
         obj.select_set(True)
         context.view_layer.objects.active = obj
-        self.report({'INFO'}, "Added %s%s" % (obj.name, (" (%d border vertices matched)" % matched) if matched else ""))
+        for m in [m for sev, m in msgs if sev == 'ERROR']:
+            self.report({'WARNING'}, m)
+        self.report({'INFO'}, "Created %s with a sky shell%s" % (
+            bsp.name, (" next to %s; select both and press Generate Seam to join them" % neighbor.name) if neighbor else ""))
         return {'FINISHED'}
 
 
-# ------------------------------------------------------------------ border lock
-
-def border_mask(mesh, rings=2):
-    """1.0 on border vertices, fading to 0 over `rings` rings of neighbors."""
-    bm = bmesh.new()
-    bm.from_mesh(mesh)
-    bm.verts.ensure_lookup_table()
-    mask = np.zeros(len(bm.verts), np.float32)
-    front = {v for e in bm.edges if len(e.link_faces) == 1 for v in e.verts}
-    seen = set(front)
-    for v in front:
-        mask[v.index] = 1.0
-    for ring in range(1, rings + 1):
-        value = 1.0 - ring / (rings + 1.0)
-        nxt = set()
-        for v in front:
-            for e in v.link_edges:
-                o = e.other_vert(v)
-                if o not in seen:
-                    seen.add(o)
-                    nxt.add(o)
-                    mask[o.index] = value
-        front = nxt
-    bm.free()
-    return mask
-
-
-def set_mask(mesh, values):
-    attr = mesh.attributes.get(MASK_ATTR) or mesh.attributes.new(MASK_ATTR, 'FLOAT', 'POINT')
-    attr.data.foreach_set("value", values)
-    mesh.update()
-
-
-def clear_mask(mesh):
-    attr = mesh.attributes.get(MASK_ATTR)
-    if attr is not None:
-        mesh.attributes.remove(attr)
-        mesh.update()
-
-
-BRUSHES = (
-    ('DRAW', "Raise / Lower", "Draw", "builtin_brush.Draw", 'SCULPTMODE_HLT'),
-    ('SMOOTH', "Smooth", "Smooth", "builtin_brush.Smooth", 'MOD_SMOOTH'),
-    ('FLATTEN', "Flatten", "Flatten/Contrast", "builtin_brush.Flatten", 'DOT'),
-    ('CLAY', "Clay", "Clay Strips", "builtin_brush.Clay Strips", 'BRUSH_CLAY_STRIPS'),
-)
-
-
-def _view3d_override(context):
-    for window in context.window_manager.windows:
-        for area in window.screen.areas:
-            if area.type == 'VIEW_3D':
-                region = next((r for r in area.regions if r.type == 'WINDOW'), None)
-                return {"window": window, "area": area, "region": region}
-    return None
-
-
-def _activate_brush(context, key):
-    entry = next(b for b in BRUSHES if b[0] == key)
-    _key_, _label, asset_name, tool_id, _icon = entry
-    override = _view3d_override(context)
-    ok = False
-    if override is not None:
-        with context.temp_override(**override):
-            try:  # Blender 4.1/4.2
-                bpy.ops.wm.tool_set_by_id(name=tool_id)
-                ok = True
-            except Exception:
-                pass
-            if not ok:
-                try:  # Blender 4.3+: brushes are assets
-                    bpy.ops.brush.asset_activate(
-                        asset_library_type='ESSENTIALS',
-                        relative_asset_identifier="brushes/essentials_brushes-mesh_sculpt.blend/Brush/%s" % asset_name)
-                    ok = True
-                except Exception:
-                    pass
-    brush = context.tool_settings.sculpt.brush
-    if brush is not None and hasattr(brush, "sculpt_plane"):
-        try:
-            brush.sculpt_plane = 'Z'  # push straight up/down
-        except Exception:
-            pass
-    return ok
-
-
-class BANANA_OT_height_brush(bpy.types.Operator):
-    """Sculpt the selected terrain with height-only brushes; borders are locked so seams stay sealed"""
-    bl_idname = "banana.height_brush"
-    bl_label = "Height Brush"
+class BANANA_OT_match_edge(bpy.types.Operator):
+    """Snap the other selected terrain's edge onto the active terrain's edge (position and height)"""
+    bl_idname = "banana.match_edge"
+    bl_label = "Match Edge"
     bl_options = {'REGISTER', 'UNDO'}
 
-    brush: EnumProperty(items=[(b[0], b[1], "") for b in BRUSHES], default='DRAW')
-
-    def execute(self, context):
-        obj = context.active_object
-        if obj is None or obj.type != 'MESH':
-            self.report({'ERROR'}, "Select a terrain mesh")
-            return {'CANCELLED'}
-        s = context.scene.banana
-        sculpt_settings = context.tool_settings.sculpt
-        if obj.mode != 'SCULPT':
-            if context.mode != 'OBJECT':
-                bpy.ops.object.mode_set(mode='OBJECT')
-            if s.lock_borders:
-                set_mask(obj.data, border_mask(obj.data, s.border_rings))
-            if not s.height_brush_active:
-                s.saved_lock_x, s.saved_lock_y = sculpt_settings.lock_x, sculpt_settings.lock_y
-            bpy.ops.object.mode_set(mode='SCULPT')
-        sculpt_settings.lock_x = True
-        sculpt_settings.lock_y = True
-        s.height_brush_active = True
-        if not _activate_brush(context, self.brush):
-            self.report({'WARNING'}, "Couldn't switch brush automatically; pick it from the toolbar (height lock is on)")
-        return {'FINISHED'}
-
-
-class BANANA_OT_done_sculpting(bpy.types.Operator):
-    """Leave the height brush: back to Object Mode, sculpt axis locks restored"""
-    bl_idname = "banana.done_sculpting"
-    bl_label = "Done Sculpting"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    keep_mask: BoolProperty(name="Keep Border Mask", default=False)
-
-    def execute(self, context):
-        s = context.scene.banana
-        obj = context.active_object
-        if obj is not None and obj.mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode='OBJECT')
-        if obj is not None and obj.type == 'MESH' and not self.keep_mask:
-            clear_mask(obj.data)
-        if s.height_brush_active:
-            context.tool_settings.sculpt.lock_x = s.saved_lock_x
-            context.tool_settings.sculpt.lock_y = s.saved_lock_y
-            s.height_brush_active = False
-        return {'FINISHED'}
-
-
-# ------------------------------------------------------------------ match borders
-
-def match_borders(scene, prefer=None):
-    """Same XY on borders of different BSPs -> same height (prefer's height if it's one of them,
-    otherwise the average). Returns the number of vertices moved."""
-    groups = {}
-    for bsp, obj in all_terrain(scene):
-        bm = bmesh.new()
-        bm.from_mesh(obj.data)
-        border = {v.index for e in bm.edges if len(e.link_faces) == 1 for v in e.verts}
-        bm.free()
-        mw = obj.matrix_world
-        for i in border:
-            w = mw @ obj.data.vertices[i].co
-            groups.setdefault(_key(w.x, w.y), []).append((bsp.name, obj, i, w.z))
-    moved = 0
-    touched = set()
-    for members in groups.values():
-        if len({m[0] for m in members}) < 2:
-            continue
-        zs = [m[3] for m in members]
-        preferred = [m[3] for m in members if m[1] is prefer]
-        z = preferred[0] if preferred else sum(zs) / len(zs)
-        for _b, obj, i, old_z in members:
-            if abs(old_z - z) > 1e-7:
-                w = obj.matrix_world @ obj.data.vertices[i].co
-                obj.data.vertices[i].co = obj.matrix_world.inverted() @ Vector((w.x, w.y, z))
-                moved += 1
-                touched.add(obj)
-    for obj in touched:
-        obj.data.update()
-    return moved
-
-
-class BANANA_OT_match_borders(bpy.types.Operator):
-    """Make terrain heights identical where two BSPs' borders meet (the active tile wins, otherwise the average)"""
-    bl_idname = "banana.match_borders"
-    bl_label = "Match Borders"
-    bl_options = {'REGISTER', 'UNDO'}
+    tolerance: FloatProperty(name="Snap Distance", default=1.0, min=0.0, subtype='DISTANCE',
+                             description="Edge vertices this close (sideways) to the active terrain's edge get snapped")
 
     def execute(self, context):
         if context.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
-        moved = match_borders(context.scene, prefer=context.active_object)
-        self.report({'INFO'}, "Matched %d border vertices; rebuild sky shells if borders moved" % moved)
+        active, other, err = _two_terrains(context)
+        if err:
+            self.report({'ERROR'}, err)
+            return {'CANCELLED'}
+        moved = match_edge(active, other, self.tolerance)
+        self.report({'INFO'}, "Matched %d edge vertices of %s to %s" % (moved, other.name, active.name))
+        return {'FINISHED'}
+
+
+class BANANA_OT_generate_seam(bpy.types.Operator):
+    """Join two selected terrain BSPs: match the shared edge and rebuild both sky shells with a seam there"""
+    bl_idname = "banana.generate_seam"
+    bl_label = "Generate Seam"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    tolerance: FloatProperty(name="Snap Distance", default=1.0, min=0.0, subtype='DISTANCE')
+
+    def execute(self, context):
+        from . import sky
+        if context.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        active, other, err = _two_terrains(context)
+        if err:
+            self.report({'ERROR'}, err)
+            return {'CANCELLED'}
+        match_edge(active, other, self.tolerance)
+        context.view_layer.update()
+        a = bsp_mod.bsp_of(active, context.scene)
+        b = bsp_mod.bsp_of(other, context.scene)
+        s = context.scene.banana
+        if s.sky_height_auto:
+            s.sky_height = sky.auto_sky_height(context)
+        weld = 0.01 / s.scale()
+        everyone = bsp_mod.find_bsps(context.scene)
+        keys = {x.name: sky.border_edge_keys(context, x, weld) for x in everyone}
+        lines = []
+        # rebuild both against every neighbor they touch, so their other seams survive
+        for bsp in (a, b):
+            neighbors = [(o, keys[o.name]) for o in everyone if o is not bsp]
+            _obj, msgs = sky.build_shell(context, bsp, s.sky_height, neighbors)
+            lines.extend(msgs)
+        problems = [m for sev, m in lines if sev == 'ERROR']
+        problems += [m for _s, m, _b in sky.check_border_alignment(context, [a, b])]
+        for m in problems[:4]:
+            self.report({'WARNING'}, m)
+        shared = len(sky.seam_triangles(context, a)) // 2
+        if shared == 0:
+            self.report({'WARNING'}, "No shared edge between %s and %s; are they touching?" % (a.name, b.name))
+            return {'FINISHED'}
+        self.report({'INFO'}, "Seam between %s and %s (%d edge segments)" % (a.name, b.name, shared))
         return {'FINISHED'}
 
 
@@ -341,26 +271,32 @@ class BANANA_PT_terrain(bpy.types.Panel):
     bl_region_type = 'UI'
     bl_category = "Banana"
     bl_label = "Terrain"
-    bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
         s = context.scene.banana
         layout = self.layout
-        layout.operator("banana.new_tile", icon='MESH_GRID')
+        layout.operator("banana.new_terrain", icon='MESH_GRID')
 
         box = layout.box()
-        box.label(text="Height Brush", icon='SCULPTMODE_HLT')
-        grid = box.grid_flow(columns=2, align=True)
-        for key, label, _a, _t, _i in BRUSHES:
-            grid.operator("banana.height_brush", text=label).brush = key
+        box.label(text="Two Terrains Selected", icon='SNAP_EDGE')
+        row = box.row(align=True)
+        row.operator("banana.match_edge", icon='SNAP_ON')
+        row.operator("banana.generate_seam", icon='AUTOMERGE_ON')
+        box.operator("banana.build_sky_shell", text="Rebuild All Skies", icon='WORLD').all_bsps = True
+
+        box = layout.box()
+        box.label(text="Set Height Brush", icon='BRUSH_DATA')
+        box.prop(s, "brush_height")
+        row = box.row(align=True)
+        row.prop(s, "brush_radius")
+        row.prop(s, "brush_strength", slider=True)
         row = box.row(align=True)
         row.prop(s, "lock_borders")
         sub = row.row(align=True)
         sub.enabled = s.lock_borders
         sub.prop(s, "border_rings", text="Falloff")
-        box.operator("banana.done_sculpting", icon='CHECKMARK')
-        layout.operator("banana.match_borders", icon='SNAP_EDGE')
+        box.operator("banana.terrain_brush", text="Paint Height", icon='SCULPTMODE_HLT').mode = 'HEIGHT'
+        box.label(text="Ctrl+click: pick height · [ ] radius · Right-click: done")
 
 
-CLASSES = (BANANA_OT_new_tile, BANANA_OT_height_brush, BANANA_OT_done_sculpting,
-           BANANA_OT_match_borders, BANANA_PT_terrain)
+CLASSES = (BANANA_OT_new_terrain, BANANA_OT_match_edge, BANANA_OT_generate_seam, BANANA_PT_terrain)

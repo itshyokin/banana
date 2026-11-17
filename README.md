@@ -33,16 +33,17 @@ You can also give any collection a role from the Outliner: right-click > Banana 
   extent). Edit the budgets under Limits > Budgets and save them as your defaults.
 
 ## Terrain (Banana > Terrain)
-- **New Terrain Tile** adds a flat grid to the active BSP. With a tile selected, it can go right
-  next to it (even in another BSP) with a perfectly matching border.
-- **Height Brush** buttons (Raise/Lower, Smooth, Flatten, Clay) use Blender's sculpt brushes,
-  limited to up/down, with the borders locked (soft falloff) so seams and the sky stay sealed.
-  Press **Done Sculpting** when finished.
-- **Match Borders** evens out heights where two BSPs' tiles meet.
-- **Blend Map**: set the BSP's terrain shader name, press **Set Up Blend Map**, then the brush
-  button next to layers 2-4 to paint them (white adds, X swaps to black to remove). Layer 1 is the
-  base. **Save Blend Map** (and every export) writes `bitmaps\<bsp>_blend.tif` with layers 1-4 in
-  R/G/B/A.
+- **New Terrain BSP** makes a new BSP with a flat terrain tile and its own sky. With a terrain
+  selected, the new one can go right next to it with a matching edge.
+- Select two terrains (in two BSPs): **Match Edge** snaps the other edge onto the active one;
+  **Generate Seam** matches the edge and turns it into a seam. **Rebuild All Skies** after
+  painting terrain higher than the sky.
+- **Paint Height** (Set Height brush): type a height and paint toward it. Ctrl+click picks the
+  height under the cursor, [ ] change the radius, right-click or Esc to finish. Borders stay locked.
+- **Blend Map**: set the BSP's terrain shader name and press Set Up. Give each layer a color or a
+  preview texture (viewport only). **Paint Blend** paints the chosen layer (layer 1 = base) or
+  blurs, with Opacity. Ctrl+Z inside the brush undoes the last stroke. **Save Blend Map** (and every
+  export) writes `bitmaps\<bsp>_blend.tif` with layers 1-4 in R/G/B/A.
 
 ## Rig Convert
 Banana > **Rig Convert** moves a body skinned to one Halo skeleton (e.g. a Reach Elite) onto

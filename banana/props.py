@@ -99,9 +99,16 @@ class BananaScene(bpy.types.PropertyGroup):
                                description="Mask terrain borders while sculpting so seams and the sky shell stay sealed")
     border_rings: IntProperty(name="Border Falloff", default=2, min=0, max=10,
                               description="Rings of vertices next to the border that are partly locked, for a soft edge")
-    height_brush_active: BoolProperty(default=False)
-    saved_lock_x: BoolProperty(default=False)
-    saved_lock_y: BoolProperty(default=False)
+    brush_height: FloatProperty(name="Height", default=0.0, subtype='DISTANCE',
+                                description="Target height the Set Height brush paints toward (world Z)")
+    brush_radius: FloatProperty(name="Radius", default=5.0, min=0.1, subtype='DISTANCE')
+    brush_strength: FloatProperty(name="Strength", default=0.5, min=0.01, max=1.0,
+                                  description="How far toward the target height each dab moves the terrain")
+    blend_layer: EnumProperty(name="Layer", items=(('1', "1", "Base (R)"), ('2', "2", "Layer 2 (G)"),
+                                                   ('3', "3", "Layer 3 (B)"), ('4', "4", "Layer 4 (A)")), default='2')
+    blend_mode: EnumProperty(name="Mode", items=(('PAINT', "Paint", "Make the chosen layer show"),
+                                                 ('BLUR', "Blur", "Soften transitions between layers")), default='PAINT')
+    blend_opacity: FloatProperty(name="Opacity", default=0.5, min=0.01, max=1.0)
     meter_overlay: BoolProperty(name="Viewport Overlay", default=False,
                                 description="Show the active BSP's meters in the corner of the 3D view")
     active_bsp: PointerProperty(
@@ -119,6 +126,13 @@ class BananaScene(bpy.types.PropertyGroup):
         return self.custom_scale
 
 
+def _refresh_preview(self, context):
+    coll = self.id_data
+    if isinstance(coll, bpy.types.Collection) and self.blend_set:
+        from . import blendmap
+        blendmap.build_preview(coll, blendmap.ensure_layers(coll))
+
+
 class BananaCollection(bpy.types.PropertyGroup):
     role: EnumProperty(name="Role", items=ROLE_ITEMS, default='NONE')
     export_enabled: BoolProperty(name="Export", default=True)
@@ -133,10 +147,20 @@ class BananaCollection(bpy.types.PropertyGroup):
     blend_set: BoolProperty(default=False)
     blend_min: FloatVectorProperty(size=2)
     blend_max: FloatVectorProperty(size=2)
-    layer1_color: FloatVectorProperty(name="Layer 1 (R)", subtype='COLOR', size=3, min=0, max=1, default=(0.25, 0.45, 0.15))
-    layer2_color: FloatVectorProperty(name="Layer 2 (G)", subtype='COLOR', size=3, min=0, max=1, default=(0.45, 0.33, 0.2))
-    layer3_color: FloatVectorProperty(name="Layer 3 (B)", subtype='COLOR', size=3, min=0, max=1, default=(0.5, 0.5, 0.5))
-    layer4_color: FloatVectorProperty(name="Layer 4 (A)", subtype='COLOR', size=3, min=0, max=1, default=(0.9, 0.9, 0.95))
+    layer1_color: FloatVectorProperty(name="Layer 1 (R)", subtype='COLOR', size=3, min=0, max=1, default=(0.25, 0.45, 0.15), update=_refresh_preview)
+    layer2_color: FloatVectorProperty(name="Layer 2 (G)", subtype='COLOR', size=3, min=0, max=1, default=(0.45, 0.33, 0.2), update=_refresh_preview)
+    layer3_color: FloatVectorProperty(name="Layer 3 (B)", subtype='COLOR', size=3, min=0, max=1, default=(0.5, 0.5, 0.5), update=_refresh_preview)
+    layer4_color: FloatVectorProperty(name="Layer 4 (A)", subtype='COLOR', size=3, min=0, max=1, default=(0.9, 0.9, 0.95), update=_refresh_preview)
+    layer1_image: PointerProperty(name="Preview Texture", type=bpy.types.Image, update=_refresh_preview,
+                                  description="Optional texture shown in the viewport for this layer (export is unaffected)")
+    layer2_image: PointerProperty(name="Preview Texture", type=bpy.types.Image, update=_refresh_preview)
+    layer3_image: PointerProperty(name="Preview Texture", type=bpy.types.Image, update=_refresh_preview)
+    layer4_image: PointerProperty(name="Preview Texture", type=bpy.types.Image, update=_refresh_preview)
+    layer1_tile: FloatProperty(name="Tile Size", default=4.0, min=0.01, subtype='DISTANCE', update=_refresh_preview,
+                               description="How many meters one repeat of the preview texture covers")
+    layer2_tile: FloatProperty(name="Tile Size", default=4.0, min=0.01, subtype='DISTANCE', update=_refresh_preview)
+    layer3_tile: FloatProperty(name="Tile Size", default=4.0, min=0.01, subtype='DISTANCE', update=_refresh_preview)
+    layer4_tile: FloatProperty(name="Tile Size", default=4.0, min=0.01, subtype='DISTANCE', update=_refresh_preview)
     stat_tris: IntProperty()
     stat_verts: IntProperty()
     stat_instances: IntProperty()

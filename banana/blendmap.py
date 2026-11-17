@@ -6,11 +6,13 @@ R/G/B/A channels are layers 1/2/3/4, read through the terrain's UVs.
 In Blender each BSP gets:
 - a top-down `blend_uv` UV map over a fixed blend area (set once, so painting
   never shifts when you add tiles later),
-- three grayscale paint images for layers 2-4 (layer 1 is the base: whatever the
-  others don't cover). Upper layers paint over lower ones, like layers in a paint
-  program, and the viewport preview shows exactly what the bake will produce,
-- a preview node setup inside the terrain material (the material keeps its name,
-  which is the shader name Tool looks up).
+- three grayscale weight images for layers 2-4 (layer 1 is the base: whatever the
+  others don't cover). Upper layers sit over lower ones, and the viewport preview
+  shows exactly what the bake will produce. Painting is done with the Banana
+  terrain brush (brush.py),
+- a preview node setup inside the terrain material, showing each layer's flat
+  color or optional preview texture (the material keeps its name, which is the
+  shader name Tool looks up; previews never reach the export).
 
 Save Blend Map (and every export) bakes them into one RGBA TIFF:
   A = w4, B = w3 (1 - w4), G = w2 (1 - w3)(1 - w4), R = (1 - w2)(1 - w3)(1 - w4)
@@ -108,8 +110,27 @@ def _node(nodes, kind, name, location):
     return node
 
 
+def _layer_source(nodes, links, uv, b, n, location):
+    """A color for layer n: its preview texture (tiled in meters) if set, else its flat color."""
+    image = getattr(b, "layer%d_image" % n)
+    if image is None:
+        rgb = _node(nodes, "ShaderNodeRGB", "color%d" % n, location)
+        rgb.outputs[0].default_value = (*getattr(b, "layer%d_color" % n), 1.0)
+        return rgb.outputs[0]
+    tile = getattr(b, "layer%d_tile" % n)
+    (x0, y0), (x1, y1) = b.blend_min, b.blend_max
+    mapping = _node(nodes, "ShaderNodeMapping", "map%d" % n, (location[0] - 200, location[1]))
+    mapping.inputs["Scale"].default_value = (max(x1 - x0, 1e-3) / tile, max(y1 - y0, 1e-3) / tile, 1.0)
+    links.new(uv.outputs[0], mapping.inputs["Vector"])
+    tex = _node(nodes, "ShaderNodeTexImage", "tex%d" % n, location)
+    tex.image = image
+    links.new(mapping.outputs[0], tex.inputs[0])
+    return tex.outputs["Color"]
+
+
 def build_preview(bsp, images):
-    """Adds/rebuilds the BANANA_ preview nodes inside the terrain material."""
+    """Adds/rebuilds the BANANA_ preview nodes inside the terrain material.
+    Preview only: the material's name (the shader name) is all the export uses."""
     b = bsp.banana
     mat = bpy.data.materials.get(b.terrain_material) or bpy.data.materials.new(b.terrain_material)
     mat.use_nodes = True
@@ -122,25 +143,21 @@ def build_preview(bsp, images):
         out = next((n for n in nodes if n.type == 'OUTPUT_MATERIAL'), None) or nodes.new("ShaderNodeOutputMaterial")
         links.new(bsdf.outputs[0], out.inputs[0])
 
-    uv = _node(nodes, "ShaderNodeUVMap", "uv", (-1100, 0))
+    uv = _node(nodes, "ShaderNodeUVMap", "uv", (-1500, 0))
     uv.uv_map = UV_NAME
-    colors = [b.layer1_color, b.layer2_color, b.layer3_color, b.layer4_color]
-    prev = _node(nodes, "ShaderNodeRGB", "color1", (-700, 300))
-    prev.outputs[0].default_value = (*colors[0], 1.0)
-    current = prev.outputs[0]
+    current = _layer_source(nodes, links, uv, b, 1, (-700, 400))
     for i, img in enumerate(images):
         n = i + 2
-        tex = _node(nodes, "ShaderNodeTexImage", "layer%d" % n, (-900, -250 * i))
-        tex.image = img
-        tex.extension = 'EXTEND'
-        links.new(uv.outputs[0], tex.inputs[0])
-        col = _node(nodes, "ShaderNodeRGB", "color%d" % n, (-700, -250 * i + 100))
-        col.outputs[0].default_value = (*colors[n - 1], 1.0)
-        mix = _node(nodes, "ShaderNodeMix", "mix%d" % n, (-450, -250 * i))
+        weight = _node(nodes, "ShaderNodeTexImage", "layer%d" % n, (-1100, -300 * i))
+        weight.image = img
+        weight.extension = 'EXTEND'
+        links.new(uv.outputs[0], weight.inputs[0])
+        color = _layer_source(nodes, links, uv, b, n, (-700, -300 * i + 120))
+        mix = _node(nodes, "ShaderNodeMix", "mix%d" % n, (-400, -300 * i))
         mix.data_type = 'RGBA'
-        links.new(tex.outputs["Color"], mix.inputs[0])            # factor
-        links.new(current, mix.inputs[6])                          # A (RGBA)
-        links.new(col.outputs[0], mix.inputs[7])                   # B (RGBA)
+        links.new(weight.outputs["Color"], mix.inputs[0])          # factor = painted weight
+        links.new(current, mix.inputs[6])                            # A
+        links.new(color, mix.inputs[7])                              # B
         current = mix.outputs[2]
     links.new(current, bsdf.inputs["Base Color"])
     return mat
@@ -251,59 +268,6 @@ class BANANA_OT_blend_setup(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class BANANA_OT_paint_layer(bpy.types.Operator):
-    """Paint this terrain layer: white adds it, black (press X to swap colors) removes it"""
-    bl_idname = "banana.paint_layer"
-    bl_label = "Paint Layer"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    layer: bpy.props.IntProperty(min=2, max=4, default=2)
-
-    def execute(self, context):
-        bsp = context.scene.banana.active_bsp
-        if bsp is None:
-            self.report({'ERROR'}, "Pick a BSP")
-            return {'CANCELLED'}
-        obj = context.active_object
-        objs = terrain_objects(bsp)
-        if obj not in objs:
-            if not objs:
-                self.report({'ERROR'}, "No terrain in this BSP uses its terrain shader material")
-                return {'CANCELLED'}
-            if context.mode != 'OBJECT':
-                bpy.ops.object.mode_set(mode='OBJECT')
-            obj = objs[0]
-            for o in context.selected_objects:
-                o.select_set(False)
-            obj.select_set(True)
-            context.view_layer.objects.active = obj
-        if bpy.data.images.get(layer_image_name(bsp, self.layer)) is None or not bsp.banana.blend_set:
-            if context.mode != 'OBJECT':
-                bpy.ops.object.mode_set(mode='OBJECT')
-            setup(bsp)
-        mat = bpy.data.materials.get(bsp.banana.terrain_material)
-        if obj.mode != 'TEXTURE_PAINT':
-            bpy.ops.object.mode_set(mode='TEXTURE_PAINT')
-        paint = context.tool_settings.image_paint
-        paint.mode = 'MATERIAL'
-        target = bpy.data.images.get(layer_image_name(bsp, self.layer))
-        images = list(mat.texture_paint_images) if mat else []
-        if target in images:
-            mat.paint_active_slot = images.index(target)
-        ups = context.tool_settings.unified_paint_settings
-        brush = paint.brush
-        for holder in (ups, brush):
-            if holder is None:
-                continue
-            try:
-                holder.color = (1.0, 1.0, 1.0)
-                holder.secondary_color = (0.0, 0.0, 0.0)
-            except Exception:
-                pass
-        self.report({'INFO'}, "Painting layer %d: white adds, X swaps to black to remove" % self.layer)
-        return {'FINISHED'}
-
-
 class BANANA_OT_clear_layer(bpy.types.Operator):
     """Erase a terrain layer everywhere"""
     bl_idname = "banana.clear_layer"
@@ -352,29 +316,45 @@ class BANANA_PT_blend(bpy.types.Panel):
     bl_parent_id = "BANANA_PT_terrain"
 
     def draw(self, context):
-        bsp = context.scene.banana.active_bsp
+        s = context.scene.banana
+        bsp = s.active_bsp
         layout = self.layout
         if bsp is None:
             layout.label(text="Pick a BSP")
             return
         b = bsp.banana
         layout.prop(b, "terrain_material")
-        layout.prop(b, "blend_resolution")
         row = layout.row(align=True)
-        row.operator("banana.blend_setup", icon='UV').refit = False
+        row.prop(b, "blend_resolution")
+        row.operator("banana.blend_setup", text="", icon='UV').refit = False
         row.operator("banana.blend_setup", text="", icon='FULLSCREEN_ENTER').refit = True
-        col = layout.column(align=True)
-        col.prop(b, "layer1_color", text="1 Base (R)")
-        for n, ch in ((2, "G"), (3, "B"), (4, "A")):
-            row = col.row(align=True)
-            row.prop(b, "layer%d_color" % n, text="%d (%s)" % (n, ch))
-            row.operator("banana.paint_layer", text="", icon='BRUSH_DATA').layer = n
-            row.operator("banana.clear_layer", text="", icon='X').layer = n
-        layout.label(text="Change colors? Press Set Up again to refresh the preview", icon='INFO')
+
+        for n, label in ((1, "1 Base (R)"), (2, "2 (G)"), (3, "3 (B)"), (4, "4 (A)")):
+            box = layout.box()
+            row = box.row(align=True)
+            row.label(text=label)
+            row.prop(b, "layer%d_color" % n, text="")
+            if n > 1:
+                row.operator("banana.clear_layer", text="", icon='X').layer = n
+            row = box.row(align=True)
+            row.template_ID(b, "layer%d_image" % n, open="image.open")
+            if getattr(b, "layer%d_image" % n) is not None:
+                box.prop(b, "layer%d_tile" % n)
+
+        box = layout.box()
+        box.label(text="Blend Brush", icon='BRUSH_DATA')
+        box.row(align=True).prop(s, "blend_mode", expand=True)
+        row = box.row(align=True)
+        row.enabled = s.blend_mode == 'PAINT'
+        row.prop(s, "blend_layer", expand=True)
+        row = box.row(align=True)
+        row.prop(s, "brush_radius")
+        row.prop(s, "blend_opacity", slider=True)
+        box.operator("banana.terrain_brush", text="Paint Blend", icon='TPAINT_HLT').mode = 'BLEND'
         layout.operator("banana.save_blend_map", icon='IMAGE_DATA')
 
 
-CLASSES = (BANANA_OT_blend_setup, BANANA_OT_paint_layer, BANANA_OT_clear_layer,
+CLASSES = (BANANA_OT_blend_setup, BANANA_OT_clear_layer,
            BANANA_OT_save_blend_map, BANANA_PT_blend)
 
 
