@@ -248,7 +248,14 @@ class BANANA_OT_validate(bpy.types.Operator):
         if not bsps:
             self.report({'ERROR'}, "No BSP selected")
             return {'CANCELLED'}
+        from . import sky
+        sky.sync_all_seams(context)
         results = [validate_bsp(context, b) for b in bsps]
+        by_name = {r.bsp.name: r for r in results}
+        everyone = bsp_mod.find_bsps(context.scene)
+        for severity, message, bsp_name in sky.check_seams(context, everyone) + sky.check_border_alignment(context, everyone):
+            if bsp_name in by_name:
+                by_name[bsp_name].add(severity, message)
         store_results(context.scene, results)
         build_problem_overlay(context.scene)
         errors = sum(r.errors for r in results)

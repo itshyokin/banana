@@ -335,6 +335,8 @@ class BANANA_OT_export(bpy.types.Operator):
         if not bsps:
             self.report({'ERROR'}, "No BSP to export")
             return {'CANCELLED'}
+        from . import sky
+        sky.sync_all_seams(context)  # mirrored seams always match their source
         exported = 0
         for bsp in bsps:
             try:

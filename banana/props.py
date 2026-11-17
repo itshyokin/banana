@@ -85,6 +85,18 @@ class BananaScene(bpy.types.PropertyGroup):
         default='SEPARATE',
     )
     run_tool_after_export: BoolProperty(name="Run Tool After Export", default=False)
+    sky_height_auto: BoolProperty(
+        name="Auto Sky Height", default=True,
+        description="Put the sky shell top 30 m above the highest terrain in any BSP",
+    )
+    sky_height: FloatProperty(
+        name="Sky Height", default=100.0, subtype='DISTANCE',
+        description="World height of every sky shell's top (shared so seams between BSPs match)",
+    )
+    live_meters: BoolProperty(name="Live Meters", default=True,
+                              description="Recount the limit meters shortly after you stop editing")
+    meter_overlay: BoolProperty(name="Viewport Overlay", default=False,
+                                description="Show the active BSP's meters in the corner of the 3D view")
     active_bsp: PointerProperty(
         name="BSP", type=bpy.types.Collection,
         poll=lambda self, coll: coll.banana.role == 'BSP',

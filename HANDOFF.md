@@ -13,13 +13,17 @@ Tool imports with `tool structure`. Named after Halo's monkey-named editors.
 optional Tool run. Headless tests pass (`tests/run_tests.py`). **Verified in real Tool:** a cube
 exported by Banana imported with Tool and loaded in Sapien/game (2026-11-17). Next: phase 2.
 
-**Rig Convert added (v0.2.0)** — see the section below. Tests: `tests/test_rig.py`. Waiting on the
+**Phase 2 done (v0.3.0):** sky shells with automatic seams, border alignment check, seam mirroring
+with auto-sync, seam pair validation, live per-BSP limit meters (+ optional viewport overlay).
+Tests: `tests/test_phase2.py`. Next: phase 3 (height brush + blend-map painting).
+
+**Rig Convert added (v0.2.0)** (parked by the user for now; level editor is the focus) — see the section below. Tests: `tests/test_rig.py`. Waiting on the
 user's real Reach + Halo 3 Elite node lists to tune auto-matching.
 
 ## Build plan (agreed with the user)
 1. ✅ Exporter + validation (prove the .ASS writer in Tool with a sealed box room)
-2. Sky shell generator, `+seam` generation/mirroring between BSPs, per-BSP limit tracker meters
-   (live, incremental recount after strokes pause; editable limits file; calibrate from Tool output)
+2. ✅ Sky shell generator, `+seam` generation/mirroring between BSPs, per-BSP limit meters
+   (TODO later: calibrate meters from Tool's output)
 3. Height brush (with border lock for seam/sky-shell verts) + terrain blend-map painting
    (Halo 3 terrain shader blends 4 materials via an RGBA **blend map bitmap**, so paint into an
    image on 0–1 UVs; check restrictions on the 4th material)
@@ -40,6 +44,36 @@ user's real Reach + Halo 3 Elite node lists to tune auto-matching.
    button (name duplicates + optional identical node setups, preview first, also images),
    shader tag existence check, material flag checkboxes, pie menu, build-style presets
 - The user does **not** want a walkable slope overlay.
+
+## Phase 2 details (banana/sky.py, banana/limits.py)
+- **Sky shell:** per BSP, takes the terrain = structure objects that aren't shells or mirrored
+  seams, welds them, chains the open border into loops, and builds vertical walls from each border
+  edge up to the scene-wide Sky Height (auto = 30 m above the highest terrain in any BSP) plus a
+  triangulated top cap, as object `<bsp>_sky_shell` (custom prop `banana_shell`, replaced on
+  rebuild). Only the largest loop is sealed; other loops (holes) are reported as errors.
+  Orientation copies the terrain's: each wall triangle walks its border edge opposite to the
+  terrain face, the cap opposite to the walls, so terrain normals must point up (into play).
+- **Automatic seams:** a border edge that exactly matches another BSP's border edge (rounded to
+  1e-4) makes `+seam:<a>_<b>` walls (names sorted, lowercase). Wall triangles always use the
+  diagonal from the lexicographically lower vertex, so both BSPs produce identical triangles;
+  each side faces into its own BSP (Microsoft docs: matching seams need the same triangulation,
+  coincident vertices, opposite normals, normals pointing into the BSP).
+- **Border alignment check:** border vertices within ~0.5 m of another BSP's border but not
+  equal are reported (no seam is made there) — this is the "edge matching" safety net.
+- **Mirror Seam to BSP:** copies a `+seam:<name>` object into another BSP as `<name>_mirror`
+  (custom prop `banana_seam_source` = ID pointer to the original). Rebuilt from the original's
+  evaluated loop triangles, winding flipped, world-baked, before every validate/export.
+- **Seam validation:** each seam name must be in exactly two BSPs with identical triangle sets and
+  opposite normals.
+- Not done: Microsoft docs mention `+seam:a` (facing out) / `+seam:b` (facing in) naming for a BSP
+  *inside* another BSP. Ask the user if they need nested BSPs before building it.
+- **Meters:** per-object cache of evaluated tris/verts/materials/bbox; depsgraph handler marks
+  changed objects dirty, a timer recounts after 0.6 s of quiet; results live in a Python dict
+  (not scene props, to avoid update loops). Budgets in `scene.banana_limits`; defaults are
+  placeholders (no published Halo 3 limits found), saveable to `<config>/banana/limits.json`.
+  Overlay: SpaceView3D POST_PIXEL blf text, toggle in the Limits panel.
+- To verify in Tool: a separate shell object seals together with the terrain (coincident
+  vertices across objects); two seamed BSPs import with `structure-seams`.
 
 ## Rig Convert (side tool inside Banana)
 Purpose: put a Reach character body (e.g. Elite) onto the Halo 3 skeleton so Halo 3's existing
@@ -68,9 +102,12 @@ banana/ass_writer.py   plain-Python ASS v7 model + writer (no bpy)
 banana/export.py       bpy -> ASS (numpy), paths, Tool runner, export operators
 banana/validate.py     validation + red BANANA_PROBLEMS overlay
 banana/ui.py           View3D sidebar > Banana; Outliner collection menu "Banana Role"
+banana/sky.py          sky shells, seams, seam mirroring + checks
+banana/limits.py       live limit meters, budgets, viewport overlay
 banana/rig.py          Rig Convert (bone map, weights, conform, rebind, test pose, presets, panel)
 tests/run_tests.py     headless map/export tests (needs a Python with the bpy module)
 tests/test_rig.py      headless Rig Convert tests
+tests/test_phase2.py   headless sky shell / seam / meter tests
 tools/build_zip.py     builds dist/banana-<version>.zip for Install Add-on
 ```
 

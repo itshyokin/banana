@@ -70,6 +70,18 @@ class BANANA_PT_bsps(BananaPanel, bpy.types.Panel):
         grid.label(text="Materials: %d" % b.stat_materials)
         grid.label(text="Portals: %d" % b.stat_portals)
 
+        box = layout.box()
+        box.label(text="Sky & Seams", icon='WORLD')
+        row = box.row(align=True)
+        row.prop(s, "sky_height_auto", text="Auto Height")
+        sub = row.row(align=True)
+        sub.enabled = not s.sky_height_auto
+        sub.prop(s, "sky_height", text="")
+        row = box.row(align=True)
+        row.operator("banana.build_sky_shell", text="Build Sky Shells", icon='MESH_CUBE').all_bsps = True
+        row.operator("banana.build_sky_shell", text="This BSP").all_bsps = False
+        box.operator("banana.mirror_seam", icon='MOD_MIRROR')
+
         col = layout.column(align=True)
         col.label(text="Collections in this BSP:")
         for sub in bsp_mod.all_collections(bsp):
