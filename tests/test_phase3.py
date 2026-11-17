@@ -102,8 +102,12 @@ def test_terrain_bsps():
     check(not sky.check_seams(ctx, [a, b]), "seam pair matches")
     for bsp in (a, b):
         check(not errors(validate.validate_bsp(ctx, bsp)), "%s still sealed" % bsp.name)
+    names_a = {m.name for o in bsp_mod.objects_for_role(a, 'STRUCTURE') for m in o.data.materials if m and m.name.startswith("+seam")}
+    names_b = {m.name for o in bsp_mod.objects_for_role(b, 'STRUCTURE') for m in o.data.materials if m and m.name.startswith("+seam")}
+    check(names_a == {"+seam:terrain_a"} and names_b == {"+seam:terrain_b"}, "each BSP has its own seam material in Blender too")
     written, _r = export.export_bsp(ctx, a)
-    check('"+seam:terrain_a"' in open(written[0]).read(), "exports +seam:terrain_a")
+    text = open(written[0]).read()
+    check(text.count('"+seam:terrain_a"') == 1 and "+seam:terrain_b" not in text, "exports exactly one seam material, +seam:terrain_a")
 
     # a third terrain north of A keeps A's seam with B when joined
     select(a_obj)
@@ -114,6 +118,26 @@ def test_terrain_bsps():
     bpy.ops.banana.generate_seam()
     c = bsp_mod.bsp_of(c_obj, ctx.scene)
     check(not sky.check_seams(ctx, [a, b, c]), "A keeps its seam with B after joining C")
+
+
+def test_fine_spacing_seam():
+    print("generate seam on 1 m terrain doesn't collapse vertices")
+    s = reset()
+    ctx = bpy.context
+    select(None)
+    bpy.ops.banana.new_terrain('EXEC_DEFAULT', name="fa", size_x=10, size_y=10, spacing=1, next_to_selected=False)
+    fa = ctx.active_object
+    bpy.ops.banana.new_terrain('EXEC_DEFAULT', name="fb", size_x=10, size_y=10, spacing=1, next_to_selected=True, side='+X')
+    fb = ctx.active_object
+    before = sorted(tuple(round(c, 4) for c in (fb.matrix_world @ v.co)) for v in fb.data.vertices)
+    select(fa, fb)
+    bpy.ops.banana.generate_seam()
+    after = sorted(tuple(round(c, 4) for c in (fb.matrix_world @ v.co)) for v in fb.data.vertices)
+    check(before == after, "no vertex moved (they already matched)")
+    a, b = (bsp_mod.bsp_of(o, ctx.scene) for o in (fa, fb))
+    check(len(sky.seam_triangles(ctx, a)) == 20 and not sky.check_seams(ctx, [a, b]), "10-segment seam pairs up")
+    for bsp in (a, b):
+        check(not errors(validate.validate_bsp(ctx, bsp)), "%s sealed" % bsp.name)
 
 
 def test_height_dab():
@@ -193,6 +217,7 @@ def test_blend_brush_and_preview():
 
 if __name__ == "__main__":
     test_terrain_bsps()
+    test_fine_spacing_seam()
     test_height_dab()
     test_blend_brush_and_preview()
     print("\n%s" % ("ALL PASSED" if not FAILS else "%d FAILED" % len(FAILS)))

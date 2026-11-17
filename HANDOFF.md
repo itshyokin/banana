@@ -178,6 +178,13 @@ tools/build_zip.py     builds dist/banana-<version>.zip for Install Add-on
 - Also avoid creating/removing datablocks while holding evaluated objects (append with
   `bm.from_mesh` + `bmesh.ops.transform` instead of `mesh.copy()`), and read evaluated meshes via
   `to_mesh()`/`to_mesh_clear()` rather than `eval_obj.data` (Edit Mode safety).
+- **v0.5.2:** user saw an extra "unpaired seam" next to a working terrain seam. A simulated
+  workflow (hills near the edge, Generate Seam, Export All) gives byte-identical seam triangles in
+  both .ass files, one seam material per side, no duplicates — so suspect leftover .ass files in
+  the structure folder or old BSPs still in the scene (waiting on the user's file list +
+  structure-seams log). Changes: each BSP's shell now uses its own `+seam:<bsp>` material in
+  Blender (was one shared `+seam` material, which the user renamed by hand), and Match Edge /
+  Generate Seam snap distance is capped at 40% of the vertex spacing.
 - **v0.5.0:** the brush called `bpy.ed.undo_push` (doesn't exist) -> error popup on every stroke.
   Correct call is `bpy.ops.ed.undo_push(message=...)`. The modal now catches any error and ends
   cleanly (removes its draw handler) instead of leaving a stuck cursor. UI-only code paths

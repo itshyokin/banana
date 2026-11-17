@@ -131,13 +131,10 @@ def check_border_alignment(context, bsps):
     return out
 
 
-SEAM_MATERIAL = "+seam"
-
-
-def seam_name(a, b):
-    # On export every +seam face becomes "+seam:<its own BSP>" (c20: the seam name must match
-    # the BSP name), so the Blender material name itself doesn't matter.
-    return SEAM_MATERIAL
+def seam_name(bsp, _other):
+    """Each BSP gets its own seam material named after itself, exactly what the export writes
+    (c20: the seam material name must match the BSP it ends up in)."""
+    return "+seam:" + bpy.path.clean_name(bsp.name)
 
 
 def material(name):

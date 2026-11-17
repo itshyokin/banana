@@ -105,6 +105,13 @@ def match_edge(target, source, tolerance):
     return moved
 
 
+def safe_tolerance(a, b, wanted):
+    """Never snap farther than 40% of the finer vertex spacing, or vertices next to the
+    edge could collapse onto it."""
+    spacing = min(a[TILE_KEY].get("spacing", wanted * 2.5), b[TILE_KEY].get("spacing", wanted * 2.5))
+    return min(wanted, 0.4 * spacing)
+
+
 def _two_terrains(context):
     """(active terrain, other terrain) from the selection, in two different BSPs."""
     active = context.active_object
@@ -217,7 +224,7 @@ class BANANA_OT_match_edge(bpy.types.Operator):
         if err:
             self.report({'ERROR'}, err)
             return {'CANCELLED'}
-        moved = match_edge(active, other, self.tolerance)
+        moved = match_edge(active, other, safe_tolerance(active, other, self.tolerance))
         self.report({'INFO'}, "Matched %d edge vertices of %s to %s" % (moved, other.name, active.name))
         return {'FINISHED'}
 
@@ -238,7 +245,7 @@ class BANANA_OT_generate_seam(bpy.types.Operator):
         if err:
             self.report({'ERROR'}, err)
             return {'CANCELLED'}
-        match_edge(active, other, self.tolerance)
+        match_edge(active, other, safe_tolerance(active, other, self.tolerance))
         context.view_layer.update()
         a = bsp_mod.bsp_of(active, context.scene)
         b = bsp_mod.bsp_of(other, context.scene)
