@@ -2,8 +2,8 @@
 
 Sky shell: seals a BSP's open terrain border with vertical walls up to the
 scene's Sky Height plus a top cap, all using '+sky' (exported as +sky<index>).
-Wall segments that sit on another BSP's terrain border become '+seam:<a>_<b>'
-instead. Both BSPs build those triangles from the same two border vertices
+Wall segments that sit on another BSP's terrain border become '+seam' instead
+(exported as '+seam:<that BSP's name>' on each side). Both BSPs build those triangles from the same two border vertices
 with the same diagonal, so the pair always has identical triangulation; each
 side faces into its own BSP, which is what Tool's seam matching wants.
 
@@ -131,9 +131,13 @@ def check_border_alignment(context, bsps):
     return out
 
 
+SEAM_MATERIAL = "+seam"
+
+
 def seam_name(a, b):
-    lo, hi = sorted((bpy.path.clean_name(a.name).lower(), bpy.path.clean_name(b.name).lower()))
-    return "+seam:%s_%s" % (lo, hi)
+    # On export every +seam face becomes "+seam:<its own BSP>" (c20: the seam name must match
+    # the BSP name), so the Blender material name itself doesn't matter.
+    return SEAM_MATERIAL
 
 
 def material(name):
@@ -379,7 +383,7 @@ class BANANA_OT_mirror_seam(bpy.types.Operator):
 # ------------------------------------------------------------------ seam validation
 
 def seam_triangles(context, bsp):
-    """seam name -> {triangle key: normal} for one BSP (world space)."""
+    """{triangle key: normal} for every +seam face in one BSP (world space)."""
     depsgraph = context.evaluated_depsgraph_get()
     out = {}
     for obj in bsp_mod.objects_for_role(bsp, 'STRUCTURE'):
@@ -394,43 +398,33 @@ def seam_triangles(context, bsp):
             for tri in mesh.loop_triangles:
                 if tri.material_index >= len(slots) or slots[tri.material_index].material is None:
                     continue
-                name = slots[tri.material_index].material.name
-                if not name.startswith("+seam"):
+                if not slots[tri.material_index].material.name.startswith("+seam"):
                     continue
                 pts = [mw @ mesh.vertices[i].co for i in tri.vertices]
                 normal = (pts[1] - pts[0]).cross(pts[2] - pts[0])
-                key = frozenset(_round(p) for p in pts)
-                out.setdefault(name, {})[key] = normal
+                out[frozenset(_round(p) for p in pts)] = normal
         finally:
             eval_obj.to_mesh_clear()
     return out
 
 
 def check_seams(context, bsps):
-    """Returns [(severity, message, bsp_name)]."""
+    """Every seam triangle needs an identical triangle in exactly one other BSP, facing the
+    other way. Returns [(severity, message, bsp_name)]."""
     per = {b.name: seam_triangles(context, b) for b in bsps}
-    names = {}
-    for bname, seams in per.items():
-        for name in seams:
-            names.setdefault(name, []).append(bname)
     out = []
-    for name, owners in sorted(names.items()):
-        if len(owners) == 1:
-            out.append(('ERROR', "Seam '%s' has no partner in another BSP" % name, owners[0]))
-            continue
-        if len(owners) > 2:
-            out.append(('ERROR', "Seam '%s' is used by %d BSPs; a seam connects exactly two" % (name, len(owners)), owners[0]))
-            continue
-        a, b = per[owners[0]][name], per[owners[1]][name]
-        missing = len(set(a) ^ set(b))
-        if missing:
-            out.append(('ERROR', "Seam '%s' doesn't match between %s and %s (%d triangles differ)" % (
-                name, owners[0], owners[1], missing), owners[0]))
-            continue
-        same_way = sum(1 for k in a if a[k].dot(b[k]) > 0)
+    for name, tris in per.items():
+        unmatched = same_way = 0
+        for key, normal in tris.items():
+            hits = [other for other in per if other != name and key in per[other]]
+            if len(hits) != 1:
+                unmatched += 1
+            elif per[hits[0]][key].dot(normal) > 0:
+                same_way += 1
+        if unmatched:
+            out.append(('ERROR', "%d seam triangles in %s have no identical partner in another BSP" % (unmatched, name), name))
         if same_way:
-            out.append(('ERROR', "Seam '%s': %d triangles face the same way in both BSPs (each side must face into its own BSP)" % (
-                name, same_way), owners[0]))
+            out.append(('ERROR', "%d seam triangles in %s face the same way as their partner (each side must face into its own BSP)" % (same_way, name), name))
     return out
 
 

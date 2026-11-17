@@ -132,7 +132,7 @@ def check_materials(context, bsp, objs, has_portals, res):
             base = final.split(":")[0]
             if len(final) > naming.MAX_MATERIAL_NAME and not naming.is_special_material(final):
                 res.add('WARNING', "Material '%s' is longer than 32 characters" % final, obj.name)
-            if final != final.lower():
+            if final != final.lower() and not naming.is_special_material(final):
                 res.add('WARNING', "Material '%s' should be lowercase" % final, obj.name)
             if not naming.is_special_material(final) and base[-1:].isdigit():
                 res.add('WARNING', "Material '%s' ends in a digit (Tool may warn about duplicate shaders); use letters for variants" % final, obj.name)

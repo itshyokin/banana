@@ -19,10 +19,19 @@ WELD_DIGITS = 6  # rounding used to share identical vertices
 
 # ---------------------------------------------------------------- materials
 
+def bsp_file_name(bsp):
+    """The .ass file name (without extension) = the BSP tag name Tool will create."""
+    return bpy.path.clean_name(bsp.name)
+
+
 def material_name(mat, bsp):
     if mat is None:
         return None
     name = naming.strip_suffix(mat.name)
+    if name.startswith("+seam"):
+        # c20: the seam material name must match the BSP it ends up in, so each half of a
+        # pair is named after its own BSP no matter what the Blender material is called
+        return "+seam:" + bsp_file_name(bsp)
     return naming.sky_material(name, bsp.banana.sky_index)
 
 
@@ -250,7 +259,7 @@ def ass_paths(context, bsp):
     base = level_dir(context)
     if not base:
         return None, None
-    name = bpy.path.clean_name(bsp.name)
+    name = bsp_file_name(bsp)
     return (os.path.join(base, "structure", name + ".ass"),
             os.path.join(base, "structure_design", name + ".ass"))
 

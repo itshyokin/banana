@@ -13,7 +13,7 @@ Tool imports with `tool structure`. Named after Halo's monkey-named editors.
 optional Tool run. Headless tests pass (`tests/run_tests.py`). **Verified in real Tool:** a cube
 exported by Banana imported with Tool and loaded in Sapien/game (2026-11-17). Next: phase 2.
 
-**Phase 2 done (v0.3.1, crash fix):** sky shells with automatic seams, border alignment check, seam mirroring
+**Phase 2 done (v0.3.3: crash fix + per-BSP seam names):** sky shells with automatic seams, border alignment check, seam mirroring
 with auto-sync, seam pair validation, live per-BSP limit meters (+ optional viewport overlay).
 Tests: `tests/test_phase2.py`. Next: phase 3 (height brush + blend-map painting).
 
@@ -53,8 +53,14 @@ user's real Reach + Halo 3 Elite node lists to tune auto-matching.
   rebuild). Only the largest loop is sealed; other loops (holes) are reported as errors.
   Orientation copies the terrain's: each wall triangle walks its border edge opposite to the
   terrain face, the cap opposite to the walls, so terrain normals must point up (into play).
+- **Seam naming (confirmed by the user from c20, 2026-11-17):** the seam material name must match
+  the BSP it ends up in, e.g. `+seam:030_BSP_000`. So the two halves of a pair have *different*
+  names (`+seam:bsp_a` in bsp_a, `+seam:bsp_b` in bsp_b). A shared name (`+seam:hall` on both
+  sides) gave "unpaired seam" in Sapien. Banana now rewrites every `+seam...` material to
+  `+seam:<BSP file name>` on export, so the Blender material name doesn't matter; pairing is
+  validated by geometry (identical triangles in exactly one other BSP, opposite facing).
 - **Automatic seams:** a border edge that exactly matches another BSP's border edge (rounded to
-  1e-4) makes `+seam:<a>_<b>` walls (names sorted, lowercase). Wall triangles always use the
+  1e-4) makes `+seam` walls. Wall triangles always use the
   diagonal from the lexicographically lower vertex, so both BSPs produce identical triangles;
   each side faces into its own BSP (Microsoft docs: matching seams need the same triangulation,
   coincident vertices, opposite normals, normals pointing into the BSP).
@@ -63,8 +69,10 @@ user's real Reach + Halo 3 Elite node lists to tune auto-matching.
 - **Mirror Seam to BSP:** copies a `+seam:<name>` object into another BSP as `<name>_mirror`
   (custom prop `banana_seam_source` = ID pointer to the original). Rebuilt from the original's
   evaluated loop triangles, winding flipped, world-baked, before every validate/export.
-- **Seam validation:** each seam name must be in exactly two BSPs with identical triangle sets and
-  opposite normals.
+- **Seam validation:** every seam triangle needs an identical triangle in exactly one other BSP,
+  facing the other way.
+- Tool order for seams (Microsoft docs): run `structure-seams` *before* importing the BSPs;
+  re-running it invalidates seams in already-imported BSP tags.
 - Not done: Microsoft docs mention `+seam:a` (facing out) / `+seam:b` (facing in) naming for a BSP
   *inside* another BSP. Ask the user if they need nested BSPs before building it.
 - **Meters:** per-object cache of evaluated tris/verts/materials/bbox; depsgraph handler marks
