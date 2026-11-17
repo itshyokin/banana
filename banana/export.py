@@ -151,6 +151,7 @@ class BuildReport:
     def __init__(self):
         self.warnings = []
         self.missing_material_faces = 0
+        self.blend_map = None
 
 
 def add_baked(scene, objs, depsgraph, scale_mat, bsp, used_uids, report, force_material=None):
@@ -294,6 +295,11 @@ def export_bsp(context, bsp):
         os.makedirs(os.path.dirname(d_path), exist_ok=True)
         ass_writer.write_file(design, d_path, **header())
         written.append(d_path)
+    if bsp.banana.blend_set:
+        from . import blendmap
+        path = blendmap.blend_path(context, bsp)
+        if path and blendmap.bake(bsp, path):
+            report.blend_map = path
     return written, report
 
 

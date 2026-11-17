@@ -2,7 +2,7 @@
 
 import bpy
 from bpy.props import (
-    BoolProperty, CollectionProperty, EnumProperty, FloatProperty,
+    BoolProperty, CollectionProperty, EnumProperty, FloatProperty, FloatVectorProperty,
     IntProperty, PointerProperty, StringProperty,
 )
 
@@ -95,6 +95,13 @@ class BananaScene(bpy.types.PropertyGroup):
     )
     live_meters: BoolProperty(name="Live Meters", default=True,
                               description="Recount the limit meters shortly after you stop editing")
+    lock_borders: BoolProperty(name="Lock Borders", default=True,
+                               description="Mask terrain borders while sculpting so seams and the sky shell stay sealed")
+    border_rings: IntProperty(name="Border Falloff", default=2, min=0, max=10,
+                              description="Rings of vertices next to the border that are partly locked, for a soft edge")
+    height_brush_active: BoolProperty(default=False)
+    saved_lock_x: BoolProperty(default=False)
+    saved_lock_y: BoolProperty(default=False)
     meter_overlay: BoolProperty(name="Viewport Overlay", default=False,
                                 description="Show the active BSP's meters in the corner of the 3D view")
     active_bsp: PointerProperty(
@@ -119,6 +126,17 @@ class BananaCollection(bpy.types.PropertyGroup):
         name="Sky Index", default=0, min=0, max=31,
         description="Faces using the plain '+sky' material export as +sky<index>",
     )
+    terrain_material: StringProperty(
+        name="Terrain Shader", default="terrain",
+        description="Name of this BSP's shader_terrain tag; new tiles and the blend-map preview use it")
+    blend_resolution: IntProperty(name="Blend Map Size", default=1024, min=64, max=8192)
+    blend_set: BoolProperty(default=False)
+    blend_min: FloatVectorProperty(size=2)
+    blend_max: FloatVectorProperty(size=2)
+    layer1_color: FloatVectorProperty(name="Layer 1 (R)", subtype='COLOR', size=3, min=0, max=1, default=(0.25, 0.45, 0.15))
+    layer2_color: FloatVectorProperty(name="Layer 2 (G)", subtype='COLOR', size=3, min=0, max=1, default=(0.45, 0.33, 0.2))
+    layer3_color: FloatVectorProperty(name="Layer 3 (B)", subtype='COLOR', size=3, min=0, max=1, default=(0.5, 0.5, 0.5))
+    layer4_color: FloatVectorProperty(name="Layer 4 (A)", subtype='COLOR', size=3, min=0, max=1, default=(0.9, 0.9, 0.95))
     stat_tris: IntProperty()
     stat_verts: IntProperty()
     stat_instances: IntProperty()

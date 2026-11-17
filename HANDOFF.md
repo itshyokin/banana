@@ -13,6 +13,11 @@ Tool imports with `tool structure`. Named after Halo's monkey-named editors.
 optional Tool run. Headless tests pass (`tests/run_tests.py`). **Verified in real Tool:** a cube
 exported by Banana imported with Tool and loaded in Sapien/game (2026-11-17). Next: phase 2.
 
+**Phase 3 done (v0.4.0):** terrain tiles, height brush (Blender sculpt, X/Y locked, border mask),
+Match Borders, blend-map painting + RGBA TIFF bake. Tests: `tests/test_phase3.py`. Not yet tried in
+the real UI/Tool — user will test phases 2 and 3 together (sky shells haven't been tried yet).
+Next: phase 4 (prop library + painting + name sync).
+
 **Phase 2 done (v0.3.3: crash fix + per-BSP seam names):** sky shells with automatic seams, border alignment check, seam mirroring
 with auto-sync, seam pair validation, live per-BSP limit meters (+ optional viewport overlay).
 Tests: `tests/test_phase2.py`. Next: phase 3 (height brush + blend-map painting).
@@ -24,9 +29,7 @@ user's real Reach + Halo 3 Elite node lists to tune auto-matching.
 1. ✅ Exporter + validation (prove the .ASS writer in Tool with a sealed box room)
 2. ✅ Sky shell generator, `+seam` generation/mirroring between BSPs, per-BSP limit meters
    (TODO later: calibrate meters from Tool's output)
-3. Height brush (with border lock for seam/sky-shell verts) + terrain blend-map painting
-   (Halo 3 terrain shader blends 4 materials via an RGBA **blend map bitmap**, so paint into an
-   image on 0–1 UVs; check restrictions on the 4th material)
+3. ✅ Height brush (with border lock) + terrain blend-map painting
 4. Prop library from a folder of GLBs (thumbnails, import once as master), prop painting into a
    sub-collection under the master's collection (link new objects straight to the target
    collection — the Titamas add-on's bug was linking to the active collection), shared mesh data,
@@ -44,6 +47,30 @@ user's real Reach + Halo 3 Elite node lists to tune auto-matching.
    button (name duplicates + optional identical node setups, preview first, also images),
    shader tag existence check, material flag checkboxes, pie menu, build-style presets
 - The user does **not** want a walkable slope overlay.
+
+## Phase 3 details (banana/terrain.py, banana/blendmap.py)
+- **Tiles:** `New Terrain Tile` makes a quad grid (normals up) in the active BSP's structure with
+  custom prop `banana_tile` = {size_x, size_y, spacing}. "Next to Selected Tile" places it edge to
+  edge on a side, forces the shared size/spacing, and copies the neighbor's border heights, so the
+  border matches exactly even across BSPs (then Build Sky Shells makes the seam).
+- **Height brush:** enters Sculpt Mode, sets `tool_settings.sculpt.lock_x/lock_y` (all brushes
+  only change height), writes a border mask to the `.sculpt_mask` attribute (1 on the border,
+  fading over N rings), switches brush via `wm.tool_set_by_id("builtin_brush.X")` (4.1/4.2) or
+  `brush.asset_activate` (4.3+) and sets `sculpt_plane = 'Z'`. Brush switching needs a real 3D
+  view (untested headless). `Done Sculpting` restores the locks and clears the mask.
+- **Match Borders:** border vertices with the same XY in different BSPs get the same height
+  (active tile wins, else average).
+- **Blend map:** per BSP, terrain = structure objects using the BSP's `terrain_material` (shader
+  name). `Set Up` fits a fixed blend area once (stored on the BSP so painting never shifts when
+  tiles are added; refit button moves paint), writes top-down `blend_uv` (warns if not UV 0),
+  creates 3 grayscale paint images `<bsp>_layer2..4` (packed; re-packed on save via save_pre),
+  and BANANA_ preview nodes inside the terrain material (layer colors, lerp chain).
+  Bake (Save Blend Map, and automatically on export once set up):
+  A = w4, B = w3(1-w4), G = w2(1-w3)(1-w4), R = (1-w2)(1-w3)(1-w4) -> straight-alpha RGBA TIFF at
+  `<level>\bitmaps\<bsp>_blend.tif`. Channel order R/G/B/A = layers 1-4 is from a community
+  write-up (blend_channel 1/2/4/8); confirm against a real shader_terrain tag.
+- To verify for real: brush switching in 4.1 UI, blend map import via Tool bitmaps + a
+  shader_terrain using it, terrain tiles + shells + seams through Tool.
 
 ## Phase 2 details (banana/sky.py, banana/limits.py)
 - **Sky shell:** per BSP, takes the terrain = structure objects that aren't shells or mirrored
@@ -114,10 +141,13 @@ banana/validate.py     validation + red BANANA_PROBLEMS overlay
 banana/ui.py           View3D sidebar > Banana; Outliner collection menu "Banana Role"
 banana/sky.py          sky shells, seams, seam mirroring + checks
 banana/limits.py       live limit meters, budgets, viewport overlay
+banana/terrain.py      terrain tiles, height brush, border mask, match borders
+banana/blendmap.py     blend-map UVs, paint layers, preview nodes, TIFF bake
 banana/rig.py          Rig Convert (bone map, weights, conform, rebind, test pose, presets, panel)
 tests/run_tests.py     headless map/export tests (needs a Python with the bpy module)
 tests/test_rig.py      headless Rig Convert tests
 tests/test_phase2.py   headless sky shell / seam / meter tests
+tests/test_phase3.py   headless terrain / blend map tests
 tools/build_zip.py     builds dist/banana-<version>.zip for Install Add-on
 ```
 
