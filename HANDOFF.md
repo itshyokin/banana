@@ -178,6 +178,10 @@ tools/build_zip.py     builds dist/banana-<version>.zip for Install Add-on
 - Also avoid creating/removing datablocks while holding evaluated objects (append with
   `bm.from_mesh` + `bmesh.ops.transform` instead of `mesh.copy()`), and read evaluated meshes via
   `to_mesh()`/`to_mesh_clear()` rather than `eval_obj.data` (Edit Mode safety).
+- **v0.5.0:** the brush called `bpy.ed.undo_push` (doesn't exist) -> error popup on every stroke.
+  Correct call is `bpy.ops.ed.undo_push(message=...)`. The modal now catches any error and ends
+  cleanly (removes its draw handler) instead of leaving a stuck cursor. UI-only code paths
+  (modal operators) aren't exercised by the headless tests — read them extra carefully.
 - Installing a new zip over a running Blender kept old submodules (the user's Sky & Seams box was
   missing). `__init__.py` now reloads all submodules when Blender reloads the package.
 

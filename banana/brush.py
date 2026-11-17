@@ -276,8 +276,11 @@ class BANANA_OT_terrain_brush(bpy.types.Operator):
         return {'RUNNING_MODAL'}
 
     def _finish(self, context):
-        bpy.types.SpaceView3D.draw_handler_remove(self._handle, 'WINDOW')
-        context.area.header_text_set(None)
+        if getattr(self, "_handle", None) is not None:
+            bpy.types.SpaceView3D.draw_handler_remove(self._handle, 'WINDOW')
+            self._handle = None
+        if context.area is not None:
+            context.area.header_text_set(None)
         s = context.scene.banana
         s.brush_radius = self.radius
         context.area.tag_redraw()
@@ -287,6 +290,14 @@ class BANANA_OT_terrain_brush(bpy.types.Operator):
                 self.report({'WARNING'}, "Terrain now reaches the sky (%.1f m); press Rebuild All Skies" % top)
 
     def modal(self, context, event):
+        try:
+            return self._modal(context, event)
+        except Exception as err:
+            self._finish(context)
+            self.report({'ERROR'}, "Terrain brush stopped: %s" % err)
+            return {'CANCELLED'}
+
+    def _modal(self, context, event):
         context.area.tag_redraw()
         s = context.scene.banana
         if event.type in {'RIGHTMOUSE', 'ESC'} and event.value == 'PRESS':
@@ -331,7 +342,10 @@ class BANANA_OT_terrain_brush(bpy.types.Operator):
                 self.painting = False
                 self.last_dab = None
                 if self.mode == 'HEIGHT':
-                    bpy.ed.undo_push(message="Banana Set Height")
+                    try:
+                        bpy.ops.ed.undo_push(message="Banana Set Height")
+                    except Exception:
+                        pass  # undo is a nicety; never break the stroke over it
             return {'RUNNING_MODAL'}
         return {'RUNNING_MODAL'}
 
