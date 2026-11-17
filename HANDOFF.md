@@ -10,8 +10,8 @@ Tool imports with `tool structure`. Named after Halo's monkey-named editors.
 
 ## Status
 **Phase 1 done (v0.1.1):** project settings, BSP collection template, validation, .ASS exporter,
-optional Tool run. Headless tests pass (`tests/run_tests.py`). **Not yet tested in real Tool** —
-first job next session is to read the user's Tool output from the box-room test.
+optional Tool run. Headless tests pass (`tests/run_tests.py`). **Verified in real Tool:** a cube
+exported by Banana imported with Tool and loaded in Sapien/game (2026-11-17). Next: phase 2.
 
 **Rig Convert added (v0.2.0)** — see the section below. Tests: `tests/test_rig.py`. Waiting on the
 user's real Reach + Halo 3 Elite node lists to tune auto-matching.
@@ -112,7 +112,7 @@ tools/build_zip.py     builds dist/banana-<version>.zip for Install Add-on
 - One sky index per cluster; MP scenarios shouldn't use multiple BSPs.
 
 ## To verify in real Tool (next session)
-- [ ] Box room imports with `tool structure` (user runs it, shares log)
+- [x] Box room imports with `tool structure` and loads in Sapien (2026-11-17, via Osoyoos + Tool)
 - [ ] Instance names with `_001` suffixes import fine; `%*` behaves as no-collision
 - [ ] Design in the same ASS works as the user expects
 - [ ] Real meters scale feels right next to a Spartan
