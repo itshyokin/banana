@@ -79,7 +79,7 @@ class BananaScene(bpy.types.PropertyGroup):
     design_mode: EnumProperty(
         name="Design Export",
         items=(
-            ('SEPARATE', "Separate File", "Design pieces go to structure-design\\<bsp>.ass"),
+            ('SEPARATE', "Separate File", "Design pieces go to structure_design\\<bsp>.ass"),
             ('COMBINED', "Same File", "Design pieces go into the BSP's structure .ass"),
         ),
         default='SEPARATE',

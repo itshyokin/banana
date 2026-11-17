@@ -250,7 +250,7 @@ def ass_paths(context, bsp):
         return None, None
     name = bpy.path.clean_name(bsp.name)
     return (os.path.join(base, "structure", name + ".ass"),
-            os.path.join(base, "structure-design", name + ".ass"))
+            os.path.join(base, "structure_design", name + ".ass"))
 
 
 def header():

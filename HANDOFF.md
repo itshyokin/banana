@@ -9,7 +9,7 @@ own settings. Each BSP is a collection; Banana validates it and exports it as a 
 Tool imports with `tool structure`. Named after Halo's monkey-named editors.
 
 ## Status
-**Phase 1 done (v0.1.0):** project settings, BSP collection template, validation, .ASS exporter,
+**Phase 1 done (v0.1.1):** project settings, BSP collection template, validation, .ASS exporter,
 optional Tool run. Headless tests pass (`tests/run_tests.py`). **Not yet tested in real Tool** —
 first job next session is to read the user's Tool output from the box-room test.
 
@@ -67,7 +67,8 @@ tools/build_zip.py     builds dist/banana-<version>.zip for Install Add-on
 - Scale: default Real Meters (1 m = 100/3.048 = 32.81 ASS units, since 1 world unit = 10 ft and
   = 100 ASS units). Also JMS units 1:1 and Custom.
 - Output: `<H3EK>\data\levels\<multi|solo>\<level>\structure\<bsp>.ass`, design pieces in
-  `structure-design\<bsp>.ass` (or the same file if Design Export = Same File).
+  `structure_design\<bsp>.ass` (folder name confirmed by the user; or the same file if Design
+  Export = Same File).
 - Tool: `tool structure <path relative to data>` / `structure-design`, cwd = H3EK root; output
   goes to the "Banana Tool Log" text block. Blocking call for now.
 
@@ -83,7 +84,7 @@ tools/build_zip.py     builds dist/banana-<version>.zip for Install Add-on
 - Instance prefixes after `%` (Microsoft docs): `>` single probe, `!` per-pixel, `?` per-vertex,
   `(n)` lightmap res, `@a-b` fade pixels. The user uses `%*` for "no collision" — confirm in Tool.
 - Water (c20): surface in structure ASS with `'` material + 4 UV channels; physics in
-  structure-design as `~water_physics00` with `#water_direction00` empty child (X = flow).
+  structure_design folder as `~water_physics00` with `#water_direction00` empty child (X = flow).
   The user says the same ASS can now hold both — Design Export = Same File supports that.
 - One sky index per cluster; MP scenarios shouldn't use multiple BSPs.
 

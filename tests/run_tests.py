@@ -157,9 +157,9 @@ def test_sealed_room_with_props():
     check(not problems(res), "validation finds no errors (%s)" % problems(res))
 
     written, report = export.export_bsp(ctx, bsp)
-    check(len(written) == 2, "writes structure + structure-design files")
+    check(len(written) == 2, "writes structure + structure_design files")
     check(written[0].endswith(os.path.join("structure", "bsp_a.ass")), "structure path")
-    check(written[1].endswith(os.path.join("structure-design", "bsp_a.ass")), "design path")
+    check(written[1].endswith(os.path.join("structure_design", "bsp_a.ass")), "design path")
 
     a = parse_ass(written[0])
     check(a["version"] == 7, "ASS version 7")
