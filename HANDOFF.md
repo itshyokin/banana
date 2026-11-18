@@ -185,6 +185,14 @@ tools/build_zip.py     builds dist/banana-<version>.zip for Install Add-on
 - Also avoid creating/removing datablocks while holding evaluated objects (append with
   `bm.from_mesh` + `bmesh.ops.transform` instead of `mesh.copy()`), and read evaluated meshes via
   `to_mesh()`/`to_mesh_clear()` rather than `eval_obj.data` (Edit Mode safety).
+- **v0.7.1 — "unmatched seam" along the seam's *top* edge in Sapien** (seam walls run up to the
+  sky cap, so their top edge only touched `+sky` faces). c20: a seam must fully seal the level geo
+  and match the BSP's edges; `+seamsealer` seals open edges with the sky rendering through it.
+  Theory being tested: +sky doesn't count as level geo, so the cap triangles along each seam's top
+  edge now use `+seamsealer` (scene setting `seam_top_material`, default "+seamsealer", empty =
+  old behavior). `naming.is_seam()` excludes +seamsealer from every seam check (its name starts
+  with "+seam"!). Waiting on the user's result. c20 also says both halves of a pair must have the
+  *same* name (contradicts the per-BSP naming that worked in the doorway test) — names are manual.
 - **v0.6.0 — seams are named by the user, not by Banana.** Seams still came through unpaired for
   the user, so at their request automatic seam naming was removed entirely. Generate Seam gives
   each BSP its own seam material (`bsp.banana.seam_material`), created as `+seam` / `+seam.001`;

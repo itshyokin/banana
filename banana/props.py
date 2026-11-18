@@ -93,6 +93,10 @@ class BananaScene(bpy.types.PropertyGroup):
         name="Sky Height", default=100.0, subtype='DISTANCE',
         description="World height of every sky shell's top (shared so seams between BSPs match)",
     )
+    seam_top_material: StringProperty(
+        name="Seam Top", default="+seamsealer",
+        description="Material for the sky-cap strip along the top of each seam, so the seam ends on real "
+                    "geometry instead of +sky. Empty = plain +sky")
     live_meters: BoolProperty(name="Live Meters", default=True,
                               description="Recount the limit meters shortly after you stop editing")
     lock_borders: BoolProperty(name="Lock Borders", default=True,

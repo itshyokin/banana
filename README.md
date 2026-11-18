@@ -25,6 +25,8 @@ You can also give any collection a role from the Outliner: right-click > Banana 
 - **Build Sky Shells** (BSPs panel) seals each BSP's terrain border with `+sky` walls and a top cap
   at the shared Sky Height. Where two BSPs' terrain borders meet exactly, those walls become a
   matching seam pair automatically. Borders that almost meet are reported.
+- The strip of sky cap along the top of each seam uses `+seamsealer` (BSPs > Sky & Seams > Seam Top),
+  so the seam ends on real geometry instead of `+sky`. Clear the field to go back to plain `+sky`.
 - Each BSP gets its own seam material, starting as `+seam`. Rename it yourself (BSPs > Sky & Seams
   > Seam name); Banana keeps your name through rebuilds and exports it as is.
 - **Mirror Seam to BSP** copies a selected `+seam` object (e.g. a doorway between two BSPs)

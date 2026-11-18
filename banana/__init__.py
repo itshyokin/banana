@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Banana",
     "author": "itshyokin",
-    "version": (0, 7, 0),
+    "version": (0, 7, 1),
     "blender": (4, 1, 0),
     "location": "View3D > Sidebar > Banana",
     "description": "Halo 3 map building toolkit (BSPs, validation, .ASS export) and Rig Convert",

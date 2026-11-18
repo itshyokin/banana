@@ -16,7 +16,7 @@ import bmesh
 import bpy
 from mathutils import Matrix, Vector
 
-from . import bsp as bsp_mod
+from . import bsp as bsp_mod, naming
 
 SHELL_KEY = "banana_shell"
 SEAM_SOURCE_KEY = "banana_seam_source"
@@ -229,6 +229,7 @@ def build_shell(context, bsp, sky_height, neighbors):
         return index[key]
 
     seam_count = 0
+    seam_tops = set()   # top edges of seam walls (pairs of vertex ids)
     for a, b, fwd in loop:
         ka, kb = _round(a.co), _round(b.co)
         mat = 0
@@ -252,6 +253,8 @@ def build_shell(context, bsp, sky_height, neighbors):
             t2.reverse()
         faces.extend((t1, t2))
         face_mats.extend((mat, mat))
+        if mat != 0:
+            seam_tops.add(frozenset((vid(lo_t), vid(hi_t))))
 
     # top cap, oriented against the first wall's top edge
     cap = [vid(Vector((a.co.x, a.co.y, sky_height))) for a, _b, _f in loop]
@@ -279,6 +282,17 @@ def build_shell(context, bsp, sky_height, neighbors):
     big = [f for f in sbm.faces if len(f.verts) > 3]
     if big:
         bmesh.ops.triangulate(sbm, faces=big, quad_method='BEAUTY', ngon_method='BEAUTY')
+    sealer = context.scene.banana.seam_top_material.strip()
+    if seam_tops and sealer:
+        # a seam has to end on real level geometry; +sky doesn't count, so the cap triangles
+        # along each seam's top edge get the sealer material (the sky still renders through it)
+        mesh.materials.append(material(sealer))
+        sealer_index = len(mesh.materials) - 1
+        for f in sbm.faces:
+            if f.material_index != 0 or any(abs(v.co.z - sky_height) > 1e-6 for v in f.verts):
+                continue
+            if any(frozenset((e.verts[0].index, e.verts[1].index)) in seam_tops for e in f.edges):
+                f.material_index = sealer_index
     sbm.to_mesh(mesh)
     sbm.free()
     mesh.update()
@@ -352,7 +366,7 @@ class BANANA_OT_build_sky_shell(bpy.types.Operator):
 # ------------------------------------------------------------------ seam mirroring
 
 def _seam_materials(obj):
-    return [s.material.name for s in obj.material_slots if s.material and s.material.name.startswith("+seam")]
+    return [s.material.name for s in obj.material_slots if s.material and naming.is_seam(s.material.name)]
 
 
 def sync_seam_partner(context, partner):
@@ -380,7 +394,7 @@ def sync_seam_partner(context, partner):
         slots = kept  # keep whatever the user named the mirrored side
     else:
         # first sync: give the mirrored side its own seam material(s) to rename
-        slots = [m.copy() if (m is not None and m.name.startswith("+seam")) else m for m in slots]
+        slots = [m.copy() if (m is not None and naming.is_seam(m.name)) else m for m in slots]
     for m in slots:
         new.materials.append(m)
     if mats:
@@ -460,7 +474,7 @@ def seam_triangles(context, bsp):
             for tri in mesh.loop_triangles:
                 if tri.material_index >= len(slots) or slots[tri.material_index].material is None:
                     continue
-                if not slots[tri.material_index].material.name.startswith("+seam"):
+                if not naming.is_seam(slots[tri.material_index].material.name):
                     continue
                 pts = [mw @ mesh.vertices[i].co for i in tri.vertices]
                 normal = (pts[1] - pts[0]).cross(pts[2] - pts[0])

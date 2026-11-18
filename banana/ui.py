@@ -81,6 +81,7 @@ class BANANA_PT_bsps(BananaPanel, bpy.types.Panel):
         row.operator("banana.build_sky_shell", text="Rebuild Sky Shells", icon='MESH_CUBE').all_bsps = True
         row.operator("banana.build_sky_shell", text="This BSP").all_bsps = False
         box.operator("banana.mirror_seam", icon='MOD_MIRROR')
+        box.prop(s, "seam_top_material")
         if b.seam_material is not None:
             row = box.row(align=True)
             row.label(text="Seam name:")

@@ -54,3 +54,8 @@ def structure_name(name, used):
         name = "%s_%d" % (base, n)
     used.add(name)
     return name
+
+
+def is_seam(name):
+    """+seam / +seam:<name>, but not +seamsealer."""
+    return name.startswith("+seam") and not name.startswith("+seamsealer")

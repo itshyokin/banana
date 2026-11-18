@@ -11,7 +11,7 @@ from mathutils import Vector
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import banana  # noqa: E402
-from banana import blendmap, brush, bsp as bsp_mod, export, sky, terrain, validate  # noqa: E402
+from banana import blendmap, brush, bsp as bsp_mod, export, naming, sky, terrain, validate  # noqa: E402
 
 FAILS = []
 
@@ -102,8 +102,8 @@ def test_terrain_bsps():
     check(not sky.check_seams(ctx, [a, b]), "seam pair matches")
     for bsp in (a, b):
         check(not errors(validate.validate_bsp(ctx, bsp)), "%s still sealed" % bsp.name)
-    mats_a = {m for o in bsp_mod.objects_for_role(a, 'STRUCTURE') for m in o.data.materials if m and m.name.startswith("+seam")}
-    mats_b = {m for o in bsp_mod.objects_for_role(b, 'STRUCTURE') for m in o.data.materials if m and m.name.startswith("+seam")}
+    mats_a = {m for o in bsp_mod.objects_for_role(a, 'STRUCTURE') for m in o.data.materials if m and naming.is_seam(m.name)}
+    mats_b = {m for o in bsp_mod.objects_for_role(b, 'STRUCTURE') for m in o.data.materials if m and naming.is_seam(m.name)}
     check(len(mats_a) == 1 and len(mats_b) == 1 and mats_a != mats_b, "each BSP has its own default seam material")
     check({m.name for m in mats_a | mats_b} == {"+seam", "+seam.001"}, "named +seam / +seam.001 until renamed")
     res = validate.validate_bsp(ctx, a)
@@ -111,7 +111,7 @@ def test_terrain_bsps():
     a.banana.seam_material.name = "+seam:my_name"
     select(a_obj, b_obj)
     bpy.ops.banana.generate_seam()
-    check({m.name for o in bsp_mod.objects_for_role(a, 'STRUCTURE') for m in o.data.materials if m and m.name.startswith("+seam")}
+    check({m.name for o in bsp_mod.objects_for_role(a, 'STRUCTURE') for m in o.data.materials if m and naming.is_seam(m.name)}
           == {"+seam:my_name"}, "rebuilding keeps your name")
     written, _r = export.export_bsp(ctx, a)
     text = open(written[0]).read()
@@ -229,6 +229,17 @@ def test_blend_edge_and_paint_across():
     check(all(abs(zs[i + 1] - zs[i]) < 1.5 for i in range(len(zs) - 1)), "smooth ramp, no cliff: %s" % [round(z, 1) for z in zs[-6:]])
     a, b = bsp_mod.bsp_of(ea, ctx.scene), bsp_mod.bsp_of(eb, ctx.scene)
     check(not sky.check_seams(ctx, [a, b]), "seam rebuilt and still pairs")
+    shell = [o for o in bsp_mod.objects_for_role(a, 'STRUCTURE') if o.get(sky.SHELL_KEY)][0]
+    sealer = [i for i, m in enumerate(shell.data.materials) if m and m.name == "+seamsealer"]
+    top = s.sky_height
+    sealed = [p for p in shell.data.polygons if sealer and p.material_index == sealer[0]]
+    check(sealed and all(abs((shell.matrix_world @ shell.data.vertices[v].co).z - top) < 1e-5 for p in sealed for v in p.vertices),
+          "cap strip along the seam's top uses +seamsealer (%d faces)" % len(sealed))
+    seam_idx = [i for i, m in enumerate(shell.data.materials) if m and naming.is_seam(m.name)][0]
+    top_edges = {frozenset(e) for p in shell.data.polygons if p.material_index == seam_idx for e in p.edge_keys
+                 if all(abs(shell.data.vertices[v].co.z - top) < 1e-5 for v in e)}
+    sealer_edges = {frozenset(e) for p in sealed for e in p.edge_keys}
+    check(top_edges and top_edges <= sealer_edges, "every seam top edge touches the sealer, not +sky")
     for bsp in (a, b):
         check(not errors(validate.validate_bsp(ctx, bsp)), "%s sealed after blending" % bsp.name)
     ends = [v for v in ea.data.vertices if abs((mw @ v.co).x - 20.0) < 1e-4 and abs(abs((mw @ v.co).y) - 20.0) < 1e-4]
