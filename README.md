@@ -44,10 +44,12 @@ You can also give any collection a role from the Outliner: right-click > Banana 
   painting terrain higher than the sky.
 - **Paint Height** (Set Height brush): type a height and paint toward it. Ctrl+click picks the
   height under the cursor, [ ] change the radius, right-click or Esc to finish. Borders stay locked.
-- **Blend Map**: set the BSP's terrain shader name and press Set Up. Give each layer a color or a
-  preview texture (viewport only). **Paint Blend** paints the chosen layer (layer 1 = base) or
-  blurs, with Opacity. Ctrl+Z inside the brush undoes the last stroke. **Save Blend Map** (and every
-  export) writes `bitmaps\<bsp>_blend.tif` with layers 1-4 in R/G/B/A.
+- **Blend Map**: each terrain BSP has its own terrain shader material (`<bsp>_terrain`; **Make
+  Unique** fixes terrains that share one). Press a **Paint** button to paint that layer in Blender's
+  Vertex Paint mode: red = layer 1, green = 2, blue = 3, black = 4. **Blur** softens; radius and
+  strength are Blender's brush settings (F / Shift+F). Give each layer a color or a preview texture
+  (shown in Material Preview while painting). **Save Blend Map** (and every export) writes
+  `bitmaps\<bsp>_blend.tif` with layers 1-4 in R/G/B/A.
 
 ## Rig Convert
 Banana > **Rig Convert** moves a body skinned to one Halo skeleton (e.g. a Reach Elite) onto

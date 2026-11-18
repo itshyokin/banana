@@ -291,57 +291,103 @@ def test_height_dab():
     check(all(abs((mw @ v.co).z - 2.0) < 1e-6 for v in edge), "locked border doesn't move")
 
 
-def test_blend_brush_and_preview():
-    print("blend brush, blur, preview textures, bake")
+def test_blend_vertex_paint():
+    print("blend painting with vertex colors, per-BSP materials, bake")
     s = reset()
     ctx = bpy.context
     select(None)
-    bpy.ops.banana.new_terrain('EXEC_DEFAULT', name="terrain_a", size_x=40, size_y=40, spacing=4, next_to_selected=False)
-    bsp = s.active_bsp
-    bsp.banana.blend_resolution = 64
+    bpy.ops.banana.new_terrain('EXEC_DEFAULT', name="ta", size_x=40, size_y=40, spacing=4, next_to_selected=False)
+    ta = ctx.active_object
+    bsp_a = s.active_bsp
+    bpy.ops.banana.new_terrain('EXEC_DEFAULT', name="tb", size_x=40, size_y=40, spacing=4, next_to_selected=True, side='+X')
+    tb = ctx.active_object
+    check(ta.data.materials[0].name == "ta_terrain" and tb.data.materials[0].name == "tb_terrain",
+          "each terrain BSP gets its own terrain material")
+
+    s.active_bsp = bsp_a
+    bsp_a.banana.blend_resolution = 64
     check(bpy.ops.banana.blend_setup() == {'FINISHED'}, "blend setup")
-    layers, images = brush.read_layers(bsp)
-    check(set(layers) == {2, 3, 4} and layers[2].shape == (64, 64), "layers read as 64x64 arrays")
+    attr = ta.data.color_attributes.get("blend")
+    check(attr is not None and attr.domain == 'POINT' and attr.data_type == 'FLOAT_COLOR', "point color attribute 'blend'")
+    check(ta.data.uv_layers[0].name == "blend_uv", "blend_uv is the first UV map")
+    nodes = bpy.data.materials["ta_terrain"].node_tree.nodes
+    check(nodes.get("BANANA_paint") is not None and nodes["BANANA_paint"].layer_name == "blend", "preview reads the painted colors")
+    tbm = bpy.data.materials["tb_terrain"]
+    check(tbm.node_tree is None or "BANANA_paint" not in tbm.node_tree.nodes, "other BSP's material untouched")
 
-    brush.blend_dab(layers, 16, 32, 8, 4, 'PAINT', 1.0)
-    check(layers[4][32, 16] > 0.97, "paint layer 4")
-    brush.blend_dab(layers, 16, 32, 8, 2, 'PAINT', 1.0)
-    check(layers[2][32, 16] > 0.97 and layers[4][32, 16] < 0.03, "painting layer 2 over it shows layer 2")
-    brush.blend_dab(layers, 16, 32, 8, 1, 'PAINT', 1.0)
-    check(max(layers[n][32, 16] for n in (2, 3, 4)) < 0.03, "painting layer 1 brings the base back")
-    brush.blend_dab(layers, 48, 32, 10, 3, 'PAINT', 0.3)
-    v = layers[3][32, 48]
-    check(0.25 < v < 0.35, "opacity 0.3 gives a partial layer (%.2f)" % v)
-    for n in (2, 3, 4):
-        layers[n][:] = 0
-    layers[3][:, 32:] = 1.0  # hard edge down the middle
-    brush.blend_dab(layers, 32, 32, 8, 2, 'BLUR', 1.0)
-    check(0.2 < layers[3][32, 31] < 0.8 and 0.2 < layers[3][32, 32] < 0.8, "blur softens the edge")
-    check(layers[3][32, 60] == 1.0 and layers[3][32, 2] == 0.0, "blur stays inside the brush")
-    brush.write_layers(layers, images)
+    # paint: left half green (layer 2), one corner black (layer 4), rest stays red (layer 1)
+    n = len(ta.data.vertices)
+    cols = np.tile(np.array((1.0, 0.0, 0.0, 1.0), np.float32), (n, 1))
+    mw = ta.matrix_world
+    for i, v in enumerate(ta.data.vertices):
+        w = mw @ v.co
+        if w.x < 0:
+            cols[i] = (0, 1, 0, 1)
+        if w.x < -11 and w.y < -11:
+            cols[i] = (0, 0, 0, 1)
+    attr.data.foreach_set("color", cols.ravel())
+    ta.data.update()
 
-    # preview texture on layer 3: nodes appear, export is still plain RGBA
     tex = bpy.data.images.new("rock_preview", 8, 8)
-    bsp.banana.layer3_image = tex
-    bsp.banana.layer3_tile = 10.0
-    mat = bpy.data.materials[bsp.banana.terrain_material]
-    nodes = mat.node_tree.nodes
-    check(nodes.get("BANANA_tex3") is not None and nodes["BANANA_tex3"].image == tex, "layer 3 shows its preview texture")
-    scale = tuple(round(x, 3) for x in nodes["BANANA_map3"].inputs["Scale"].default_value)
-    check(scale == (4.0, 4.0, 1.0), "tiles every 10 m over the 40 m area %s" % (scale,))
-    check(nodes.get("BANANA_color3") is None and nodes.get("BANANA_color2") is not None, "other layers keep flat colors")
+    bsp_a.banana.layer3_image = tex
+    bsp_a.banana.layer3_tile = 10.0
+    nodes = bpy.data.materials["ta_terrain"].node_tree.nodes
+    check(nodes.get("BANANA_tex3") is not None and tuple(round(x, 3) for x in nodes["BANANA_map3"].inputs["Scale"].default_value)
+          == (4.0, 4.0, 1.0), "preview texture tiles every 10 m")
 
-    written, report = export.export_bsp(ctx, bsp)
+    written, report = export.export_bsp(ctx, bsp_a)
     img = bpy.data.images.load(report.blend_map, check_existing=False)
     img.alpha_mode = 'STRAIGHT'
     img.colorspace_settings.name = 'Non-Color'
     px = np.empty(64 * 64 * 4, np.float32)
     img.pixels.foreach_get(px)
     px = px.reshape(64, 64, 4)
-    check(tuple(np.round(px[32, 60], 2)) == (0.0, 0.0, 1.0, 0.0), "layer 3 -> B in the bake")
-    check(tuple(np.round(px[10, 2], 2)) == (1.0, 0.0, 0.0, 0.0), "base -> R in the bake")
-    check(abs(px.sum(axis=2) - 1).max() < 0.02, "channels add up to 1")
-    check(bpy.data.materials[bsp.banana.terrain_material].name == "terrain", "material name (shader) unchanged")
+    check(tuple(np.round(px[32, 56], 2)) == (1.0, 0.0, 0.0, 0.0), "red -> layer 1 (R) %s" % (tuple(np.round(px[32, 56], 2)),))
+    check(tuple(np.round(px[40, 12], 2)) == (0.0, 1.0, 0.0, 0.0), "green -> layer 2 (G) %s" % (tuple(np.round(px[40, 12], 2)),))
+    check(tuple(np.round(px[2, 2], 2)) == (0.0, 0.0, 0.0, 1.0), "black -> layer 4 (A) %s" % (tuple(np.round(px[2, 2], 2)),))
+    mid = px[32, 28]  # between the green column at x = -4 and the red one at x = 0
+    check(0.3 < mid[0] < 0.7 and 0.3 < mid[1] < 0.7, "smooth blend between vertices (%s)" % (tuple(np.round(mid, 2)),))
+    check(abs(px.sum(axis=2) - 1).max() < 0.01, "channels add up to 1")
+
+    w = blendmap.weights_from_colors(np.array([[0.5, 0.5, 0.0], [0.2, 0.0, 0.0], [0.6, 0.6, 0.6]]))
+    check(np.allclose(w[0], [0.5, 0.5, 0, 0]) and np.allclose(w[1], [0.2, 0, 0, 0.8]) and abs(w[2].sum() - 1) < 1e-6,
+          "weights: partial black becomes layer 4, sums normalized")
+
+    # Make Unique fixes a shared material
+    bsp_b = bsp_mod.bsp_of(tb, ctx.scene)
+    tb.data.materials[0] = bpy.data.materials["ta_terrain"]
+    bsp_b.banana.terrain_material = "ta_terrain"
+    res = []
+    bpy.ops.banana.validate(all_bsps=True)
+    check(any("shared" in p.message for p in ctx.scene.banana.problems), "Validate warns about a shared terrain material")
+    s.active_bsp = bsp_b
+    bpy.ops.banana.unique_terrain_material()
+    check(tb.data.materials[0].name == "tb_terrain" and bsp_b.banana.terrain_material == "tb_terrain"
+          and ta.data.materials[0].name == "ta_terrain", "Make Unique gives tb its own material")
+
+
+def test_convert_old_layers():
+    print("paint from v0.5 image layers is converted")
+    s = reset()
+    ctx = bpy.context
+    select(None)
+    bpy.ops.banana.new_terrain('EXEC_DEFAULT', name="old", size_x=40, size_y=40, spacing=4, next_to_selected=False)
+    obj = ctx.active_object
+    bsp = s.active_bsp
+    blendmap.fit_area(bsp, [obj])
+    for nlayer in (2, 3, 4):
+        img = bpy.data.images.new("old_layer%d" % nlayer, 16, 16, alpha=False)
+        px = np.zeros((16, 16, 4), np.float32)
+        px[..., 3] = 1
+        if nlayer == 3:
+            px[:, 8:, :3] = 1  # layer 3 on the east half
+        img.pixels.foreach_set(px.ravel())
+    blendmap.setup(bsp)
+    cols = blendmap.read_colors(obj)
+    xy = blendmap._world_xy(obj)
+    east = cols[xy[:, 0] > 5]
+    west = cols[xy[:, 0] < -5]
+    check(np.allclose(east, [0, 0, 1]) and np.allclose(west, [1, 0, 0]), "east half became layer 3 (blue), west stays base")
 
 
 if __name__ == "__main__":
@@ -350,6 +396,7 @@ if __name__ == "__main__":
     test_fine_spacing_seam()
     test_blend_edge_and_paint_across()
     test_height_dab()
-    test_blend_brush_and_preview()
+    test_blend_vertex_paint()
+    test_convert_old_layers()
     print("\n%s" % ("ALL PASSED" if not FAILS else "%d FAILED" % len(FAILS)))
     sys.exit(1 if FAILS else 0)

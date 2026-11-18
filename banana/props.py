@@ -108,11 +108,10 @@ class BananaScene(bpy.types.PropertyGroup):
     brush_radius: FloatProperty(name="Radius", default=5.0, min=0.1, subtype='DISTANCE')
     brush_strength: FloatProperty(name="Strength", default=0.5, min=0.01, max=1.0,
                                   description="How far toward the target height each dab moves the terrain")
-    blend_layer: EnumProperty(name="Layer", items=(('1', "1", "Base (R)"), ('2', "2", "Layer 2 (G)"),
-                                                   ('3', "3", "Layer 3 (B)"), ('4', "4", "Layer 4 (A)")), default='2')
-    blend_mode: EnumProperty(name="Mode", items=(('PAINT', "Paint", "Make the chosen layer show"),
-                                                 ('BLUR', "Blur", "Soften transitions between layers")), default='PAINT')
-    blend_opacity: FloatProperty(name="Opacity", default=0.5, min=0.01, max=1.0)
+    paint_layer: StringProperty(default="1")
+    preview_while_painting: BoolProperty(
+        name="Show Textures While Painting", default=True,
+        description="Switch the 3D view to Material Preview when painting, so the layer textures show")
     meter_overlay: BoolProperty(name="Viewport Overlay", default=False,
                                 description="Show the active BSP's meters in the corner of the 3D view")
     active_bsp: PointerProperty(
@@ -134,7 +133,7 @@ def _refresh_preview(self, context):
     coll = self.id_data
     if isinstance(coll, bpy.types.Collection) and self.blend_set:
         from . import blendmap
-        blendmap.build_preview(coll, blendmap.ensure_layers(coll))
+        blendmap.build_preview(coll)
 
 
 class BananaCollection(bpy.types.PropertyGroup):

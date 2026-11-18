@@ -5,12 +5,10 @@ height (Strength = how far per dab, soft falloff to the edge of the circle).
 Ctrl+click samples the height under the cursor. Terrain borders are locked
 (with a soft falloff) so seams and sky shells stay sealed.
 
-BLEND mode: paints the active BSP's blend layers. Paint makes the chosen layer
-show (layers above it fade out, so painting layer 1 brings the base back);
-Blur softens the transitions between layers. Opacity sets how strong each dab is.
+Blend painting is done in Blender's own Vertex Paint mode (see blendmap.py).
 
-Keys while the brush is active: LMB paint, Ctrl+LMB (height) sample height,
-[ / ] radius, Ctrl+Z undo last stroke (blend), Right-click / Esc to finish.
+Keys while the brush is active: LMB paint, Ctrl+LMB sample height,
+[ / ] radius, Right-click / Esc to finish.
 Middle mouse, wheel and numpad still move the view.
 """
 
@@ -112,70 +110,6 @@ def height_dab(obj, center, radius, target, strength, mask=None):
     return True
 
 
-def _box_blur(a, k):
-    """Separable box blur with edge clamping."""
-    if k < 1:
-        return a.copy()
-    pad = np.pad(a, k, mode='edge')
-    c = np.cumsum(np.cumsum(pad, axis=0), axis=1)
-    c = np.pad(c, ((1, 0), (1, 0)))
-    s = 2 * k + 1
-    total = c[s:, s:] - c[:-s, s:] - c[s:, :-s] + c[:-s, :-s]
-    return total / (s * s)
-
-
-def blend_dab(layers, cx, cy, rad_px, layer, mode, opacity):
-    """layers: {2: HxW, 3: HxW, 4: HxW} float arrays (edited in place).
-    cx, cy in pixels. Returns the touched (y0, y1, x0, x1) box or None."""
-    h, w = layers[2].shape
-    r = max(rad_px, 0.5)
-    x0, x1 = max(int(cx - r), 0), min(int(cx + r) + 2, w)
-    y0, y1 = max(int(cy - r), 0), min(int(cy + r) + 2, h)
-    if x0 >= x1 or y0 >= y1:
-        return None
-    yy, xx = np.mgrid[y0:y1, x0:x1]
-    a = opacity * falloff(np.hypot(xx + 0.5 - cx, yy + 0.5 - cy) / r)
-    if mode == 'PAINT':
-        if layer >= 2:
-            region = layers[layer][y0:y1, x0:x1]
-            region += (1.0 - region) * a
-        for upper in range(max(layer + 1, 2), 5):
-            region = layers[upper][y0:y1, x0:x1]
-            region -= region * a
-    else:  # BLUR
-        k = max(1, int(r / 4))
-        by0, by1 = max(y0 - k, 0), min(y1 + k, h)
-        bx0, bx1 = max(x0 - k, 0), min(x1 + k, w)
-        for n in (2, 3, 4):
-            big = layers[n][by0:by1, bx0:bx1]
-            blurred = _box_blur(big, k)[y0 - by0:y1 - by0, x0 - bx0:x1 - bx0]
-            region = layers[n][y0:y1, x0:x1]
-            region += (blurred - region) * a
-    return (y0, y1, x0, x1)
-
-
-def read_layers(bsp):
-    out, images = {}, {}
-    for n in (2, 3, 4):
-        img = bpy.data.images.get(blendmap.layer_image_name(bsp, n))
-        w, h = img.size
-        px = np.empty(w * h * 4, np.float32)
-        img.pixels.foreach_get(px)
-        out[n] = px.reshape(h, w, 4)[:, :, 0].copy()
-        images[n] = img
-    return out, images
-
-
-def write_layers(layers, images, which=(2, 3, 4)):
-    for n in which:
-        g = np.clip(layers[n], 0.0, 1.0)
-        rgba = np.empty(g.shape + (4,), np.float32)
-        rgba[..., 0] = rgba[..., 1] = rgba[..., 2] = g
-        rgba[..., 3] = 1.0
-        images[n].pixels.foreach_set(rgba.ravel())
-        images[n].update()
-
-
 # ------------------------------------------------------------------ modal operator
 
 def _circle_points(center, radius, z, segments=48):
@@ -205,12 +139,12 @@ def _draw_cursor(op, _context):
 
 
 class BANANA_OT_terrain_brush(bpy.types.Operator):
-    """Paint terrain: Set Height or blend layers. Right-click or Esc when done"""
+    """Set Height brush: paint terrain toward the target height. Right-click or Esc when done"""
     bl_idname = "banana.terrain_brush"
     bl_label = "Terrain Brush"
     bl_options = {'REGISTER'}
 
-    mode: EnumProperty(items=(('HEIGHT', "Set Height", ""), ('BLEND', "Blend", "")), default='HEIGHT')
+    mode: EnumProperty(items=(('HEIGHT', "Set Height", ""),), default='HEIGHT')
 
     # ---- helpers
     def _raycast(self, context, event):
@@ -233,30 +167,17 @@ class BANANA_OT_terrain_brush(bpy.types.Operator):
 
     def _header(self, context):
         s = context.scene.banana
-        if self.mode == 'HEIGHT':
-            text = "Set Height %.2f m · radius %.1f · strength %.2f   LMB paint · Ctrl+LMB pick height · [ ] radius · RMB/Esc done" % (
-                self.target_height, self.radius, s.brush_strength)
-        else:
-            what = "Blur" if s.blend_mode == 'BLUR' else "Paint layer %s" % s.blend_layer
-            text = "%s · radius %.1f · opacity %.2f   LMB paint · [ ] radius · Ctrl+Z undo stroke · RMB/Esc done" % (
-                what, self.radius, s.blend_opacity)
+        text = "Set Height %.2f m · radius %.1f · strength %.2f   LMB paint · Ctrl+LMB pick height · [ ] radius · RMB/Esc done" % (
+            self.target_height, self.radius, s.brush_strength)
         context.area.header_text_set(text)
 
     def _dab(self, context, point):
         s = context.scene.banana
-        if self.mode == 'HEIGHT':
-            for obj in self.objects:
-                height_dab(obj, point, self.radius, self.target_height, s.brush_strength, self.masks.get(obj.name))
-        else:
-            b = self.bsp.banana
-            (x0, y0), (x1, y1) = b.blend_min, b.blend_max
-            h, w = self.layers[2].shape
-            cx = (point[0] - x0) / ((x1 - x0) or 1.0) * w
-            cy = (point[1] - y0) / ((y1 - y0) or 1.0) * h
-            rad_px = self.radius / ((x1 - x0) or 1.0) * w
-            if blend_dab(self.layers, cx, cy, rad_px, int(s.blend_layer), s.blend_mode, s.blend_opacity):
-                write_layers(self.layers, self.images)
+        for obj in self.objects:
+            if height_dab(obj, point, self.radius, self.target_height, s.brush_strength, self.masks.get(obj.name)):
+                obj.update_tag(refresh={'DATA'})
         self.last_dab = point.copy()
+        context.area.tag_redraw()
 
     @classmethod
     def poll(cls, context):
@@ -275,8 +196,7 @@ class BANANA_OT_terrain_brush(bpy.types.Operator):
         self.hit = None
         self.painting = False
         self.last_dab = None
-        self.undo = []
-        if self.mode == 'HEIGHT':
+        if True:
             self.objects = [obj for _b, obj in terrain.all_terrain(context.scene)]
             for bsp in bsp_mod.find_bsps(context.scene):
                 for obj in blendmap.terrain_objects(bsp):
@@ -292,15 +212,6 @@ class BANANA_OT_terrain_brush(bpy.types.Operator):
             everyone = bsp_mod.find_bsps(context.scene)
             self.seam_plans = {b.name: sky.existing_seam_partners(context, b, [o for o in everyone if o is not b], weld)
                                for b in everyone}
-        else:
-            self.bsp = s.active_bsp
-            if self.bsp is None:
-                self.report({'ERROR'}, "Pick a BSP")
-                return {'CANCELLED'}
-            if not self.bsp.banana.blend_set or bpy.data.images.get(blendmap.layer_image_name(self.bsp, 2)) is None:
-                blendmap.setup(self.bsp)
-            self.objects = blendmap.terrain_objects(self.bsp)
-            self.layers, self.images = read_layers(self.bsp)
         if not self.objects:
             self.report({'ERROR'}, "No terrain to paint")
             return {'CANCELLED'}
@@ -318,7 +229,7 @@ class BANANA_OT_terrain_brush(bpy.types.Operator):
         s = context.scene.banana
         s.brush_radius = self.radius
         context.area.tag_redraw()
-        if self.mode == 'HEIGHT':
+        if True:
             self._rebuild_moved_edges(context)
             top = max((max((o.matrix_world @ Vector(c)).z for c in o.bound_box) for o in self.objects), default=0.0)
             if top > s.sky_height - 1.0 and not s.sky_height_auto:
@@ -334,11 +245,10 @@ class BANANA_OT_terrain_brush(bpy.types.Operator):
                 bsp = bsp_mod.bsp_of(o, context.scene)
                 if bsp is not None:
                     moved.add(bsp.name)
-        if not moved:
-            return
         plans = {name: self.seam_plans.get(name, []) for name in moved}
-        terrain_mod._rebuild(context, plans)
-        self.report({'INFO'}, "Rebuilt the skies of %s to follow the painted edges" % ", ".join(sorted(moved)))
+        terrain_mod._rebuild(context, plans)  # also raises every sky if the terrain got too tall
+        if moved:
+            self.report({'INFO'}, "Rebuilt the skies of %s to follow the painted edges" % ", ".join(sorted(moved)))
 
     def modal(self, context, event):
         try:
@@ -360,12 +270,6 @@ class BANANA_OT_terrain_brush(bpy.types.Operator):
             self.radius *= 0.85 if event.type == 'LEFT_BRACKET' else 1.0 / 0.85
             self._header(context)
             return {'RUNNING_MODAL'}
-        if event.type == 'Z' and event.ctrl and event.value == 'PRESS' and self.mode == 'BLEND':
-            if self.undo:
-                for n, arr in self.undo.pop().items():
-                    self.layers[n][:] = arr
-                write_layers(self.layers, self.images)
-            return {'RUNNING_MODAL'}
         if event.type == 'MOUSEMOVE':
             point, _obj = self._raycast(context, event)
             self.hit = point
@@ -378,25 +282,20 @@ class BANANA_OT_terrain_brush(bpy.types.Operator):
                 point, _obj = self._raycast(context, event)
                 if point is None:
                     return {'RUNNING_MODAL'}
-                if self.mode == 'HEIGHT' and event.ctrl:
+                if event.ctrl:
                     self.target_height = s.brush_height = point.z
                     self._header(context)
                     return {'RUNNING_MODAL'}
-                if self.mode == 'HEIGHT':
-                    self.target_height = s.brush_height  # pick up edits made in the panel
-                else:
-                    self.undo.append({n: a.copy() for n, a in self.layers.items()})
-                    del self.undo[:-5]
+                self.target_height = s.brush_height  # pick up edits made in the panel
                 self.painting = True
                 self._dab(context, point)
             elif event.value == 'RELEASE' and self.painting:
                 self.painting = False
                 self.last_dab = None
-                if self.mode == 'HEIGHT':
-                    try:
-                        bpy.ops.ed.undo_push(message="Banana Set Height")
-                    except Exception:
-                        pass  # undo is a nicety; never break the stroke over it
+                try:
+                    bpy.ops.ed.undo_push(message="Banana Set Height")
+                except Exception:
+                    pass  # undo is a nicety; never break the stroke over it
             return {'RUNNING_MODAL'}
         return {'RUNNING_MODAL'}
 

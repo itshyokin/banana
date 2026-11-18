@@ -13,6 +13,13 @@ Tool imports with `tool structure`. Named after Halo's monkey-named editors.
 optional Tool run. Headless tests pass (`tests/run_tests.py`). **Verified in real Tool:** a cube
 exported by Banana imported with Tool and loaded in Sapien/game (2026-11-17). Next: phase 2.
 
+**v0.8.0 (user feedback):** blend painting moved to **vertex colors in Blender's own Vertex Paint
+mode**, like the Titamas add-on (the image-based Banana blend brush updated slowly and only
+redrew on navigation). Every terrain BSP now gets its **own terrain material** `<bsp>_terrain`
+(each BSP needs its own shader_terrain/blend map; the shared "terrain" material also made the
+second BSP's preview overwrite the first's). Make Unique fixes older files; Validate warns.
+See "Blend map (v0.8.0)" below.
+
 **Phase 3 done (v0.5.0, reworked after user feedback):** every terrain is its own BSP with its
 own sky shell; Match Edge + Generate Seam for two selected terrain BSPs; custom Set Height brush;
 custom blend brush (paint/blur/opacity) with per-layer preview textures; RGBA TIFF bake.
@@ -82,19 +89,21 @@ user's real Reach + Halo 3 Elite node lists to tune auto-matching.
   HEIGHT: `height_dab` moves verts within the radius (XY distance) toward the target world Z with
   strength * smooth falloff * (1 - border mask); X/Y never change; Ctrl+click samples the height;
   one undo step per stroke (`bpy.ed.undo_push`); warns if terrain reaches the sky height.
-  BLEND: `blend_dab` on numpy copies of the layer images (world XY -> blend area -> pixels).
-  Paint layer N raises N toward 1 and fades layers above N (so painting 1 = back to base);
-  Blur = local box blur of all three layers. Own stroke undo (Ctrl+Z inside the brush, last 5).
-  Radius with [ ], navigation passes through.
-- **Blend map:** per BSP, terrain = structure objects using the BSP's `terrain_material`. Set Up
-  fits a fixed blend area once (stored on the BSP; refit button moves paint), top-down `blend_uv`
-  (warns if not UV 0), 3 grayscale weight images `<bsp>_layer2..4` (packed; re-packed on save),
-  BANANA_ preview nodes in the terrain material: per layer a flat color or an optional preview
-  texture tiled every N meters (Mapping node), lerp chain; rebuilt live when colors/textures/tile
-  sizes change. Bake (Save Blend Map, and on export once set up):
-  A = w4, B = w3(1-w4), G = w2(1-w3)(1-w4), R = (1-w2)(1-w3)(1-w4) -> straight-alpha RGBA TIFF at
-  `<level>\bitmaps\<bsp>_blend.tif`. R/G/B/A = layers 1-4 is from a community write-up
-  (blend_channel 1/2/4/8); confirm against a real shader_terrain tag.
+  (The v0.5-0.7 image-based BLEND mode was removed in v0.8.0.) Radius with [ ], navigation
+  passes through. When the brush finishes it also raises every sky if the terrain got too tall.
+- **Blend map (v0.8.0):** per BSP, terrain = structure objects using the BSP's `terrain_material`
+  (default `<bsp>_terrain`). Set Up fits a fixed blend area (tile bounds), writes top-down
+  `blend_uv` (UV 0 = what Halo samples the blend map with), and adds a POINT FLOAT_COLOR attribute
+  `blend` (linear, so partial strokes keep sums right). Paint buttons enter Vertex Paint and set
+  the brush color: R = layer 1, G = layer 2, B = layer 3, black = layer 4
+  (w4 = max(0, 1 - (r+g+b)); weights normalized). Blur = Blender's Blur vertex brush; strength,
+  radius and falloff are Blender's. Fill sets a whole terrain to one layer. Preview nodes
+  (BANANA_*) read the color attribute and weight each layer's flat color or tiled preview texture;
+  with "Show Textures While Painting" the view switches to Material Preview. Bake: per tile grid
+  (vertex order = make_tile row-major), bilinear interpolation to Blend Map Size over the area ->
+  straight-alpha RGBA TIFF `<level>\bitmaps\<bsp>_blend.tif` (R/G/B/A = layers 1-4; channel order
+  from a community write-up). Non-tile meshes are skipped by the bake. v0.5 image layers
+  (`<bsp>_layer2..4`) are converted into vertex colors the first time Set Up runs.
 - To verify for real: the modal brush in the 4.1 UI (cursor drawing, undo), terrain BSPs + shells
   + seams through Tool, blend map through Tool bitmaps + a shader_terrain.
 
@@ -169,8 +178,8 @@ banana/ui.py           View3D sidebar > Banana; Outliner collection menu "Banana
 banana/sky.py          sky shells, seams, seam mirroring + checks
 banana/limits.py       live limit meters, budgets, viewport overlay
 banana/terrain.py      terrain BSPs, Match Edge, Generate Seam, Terrain panel
-banana/brush.py        modal terrain brush: Set Height + blend paint/blur (+ the dab math)
-banana/blendmap.py     blend-map UVs, paint layers, preview nodes, TIFF bake
+banana/brush.py        modal Set Height brush (+ dab math, border mask, shared-edge handling)
+banana/blendmap.py     vertex-color blend painting, per-BSP terrain material, preview nodes, TIFF bake
 banana/rig.py          Rig Convert (bone map, weights, conform, rebind, test pose, presets, panel)
 tests/run_tests.py     headless map/export tests (needs a Python with the bpy module)
 tests/test_rig.py      headless Rig Convert tests

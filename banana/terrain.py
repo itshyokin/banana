@@ -303,7 +303,10 @@ class BANANA_OT_new_terrain(bpy.types.Operator):
 
         name = self.name.strip() or self._default_name(context)
         bsp = bsp_mod.create_bsp(context.scene, name)
-        mat_name = bsp.banana.terrain_material or "terrain"
+        # every terrain BSP needs its own shader_terrain (each has its own blend map)
+        from .blendmap import default_material_name
+        bsp.banana.terrain_material = default_material_name(bsp)
+        mat_name = bsp.banana.terrain_material
         material = bpy.data.materials.get(mat_name) or bpy.data.materials.new(mat_name)
         obj = make_tile("%s_ground" % bsp.name, self.size_x, self.size_y, self.spacing, location, material)
         bsp_mod.sub_collections(bsp, 'STRUCTURE')[0].objects.link(obj)

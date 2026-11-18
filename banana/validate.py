@@ -255,6 +255,17 @@ class BANANA_OT_validate(bpy.types.Operator):
         results = [validate_bsp(context, b) for b in bsps]
         by_name = {r.bsp.name: r for r in results}
         everyone = bsp_mod.find_bsps(context.scene)
+        from . import blendmap
+        users = {}
+        for b in everyone:
+            if blendmap.terrain_objects(b):
+                users.setdefault(b.banana.terrain_material, []).append(b.name)
+        for mat, names in users.items():
+            if len(names) > 1:
+                for n in names:
+                    if n in by_name:
+                        by_name[n].add('WARNING', "Terrain material '%s' is shared by %s; each BSP needs its own "
+                                       "(Blend Map > Make Unique)" % (mat, ", ".join(names)))
         for severity, message, bsp_name in sky.check_seams(context, everyone) + sky.check_border_alignment(context, everyone) + sky.check_overlaps(context, everyone):
             if bsp_name in by_name:
                 by_name[bsp_name].add(severity, message)
