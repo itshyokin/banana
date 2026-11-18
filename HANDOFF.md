@@ -133,6 +133,9 @@ user's real Reach + Halo 3 Elite node lists to tune auto-matching.
   Overlay: SpaceView3D POST_PIXEL blf text, toggle in the Limits panel.
 - ✅ Verified in Tool/Sapien (2026-11-17): two rooms joined by a mirrored doorway seam pair up
   (after the per-BSP seam naming fix).
+- ✅ Verified (2026-11-17): two terrain BSPs with Generate Seam + blended edge load and connect,
+  once the Tool order was right. Possible next step offered to the user: make "Run Tool After
+  Export" run structure-seams first and then re-import every BSP automatically.
 - Still to verify: a separate sky shell object seals together with the terrain (coincident
   vertices across objects); terrain seams from Build Sky Shells.
 
@@ -191,7 +194,10 @@ tools/build_zip.py     builds dist/banana-<version>.zip for Install Add-on
   Theory being tested: +sky doesn't count as level geo, so the cap triangles along each seam's top
   edge now use `+seamsealer` (scene setting `seam_top_material`, default "+seamsealer", empty =
   old behavior). `naming.is_seam()` excludes +seamsealer from every seam check (its name starts
-  with "+seam"!). Waiting on the user's result. c20 also says both halves of a pair must have the
+  with "+seam"!). **Result (2026-11-17):** the "unmatched seam" was a stale structure_seams tag; it went away with
+  the right Tool order (empty structure folder -> Export All -> structure-seams -> import *both*
+  BSPs). Terrain seams now work in Sapien. Whether +seamsealer at the seam top was also needed is
+  unknown (it was in place when it worked; leave it on). c20 also says both halves of a pair must have the
   *same* name (contradicts the per-BSP naming that worked in the doorway test) — names are manual.
 - **v0.6.0 — seams are named by the user, not by Banana.** Seams still came through unpaired for
   the user, so at their request automatic seam naming was removed entirely. Generate Seam gives
