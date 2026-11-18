@@ -13,6 +13,14 @@ Tool imports with `tool structure`. Named after Halo's monkey-named editors.
 optional Tool run. Headless tests pass (`tests/run_tests.py`). **Verified in real Tool:** a cube
 exported by Banana imported with Tool and loaded in Sapien/game (2026-11-17). Next: phase 2.
 
+**Phase 4 done (v0.9.0):** prop library from a folder of GLBs, master + painted sub-collection
+per prop per BSP, shared mesh, flag/name sync, prop brush (scatter/erase). Also: layer preview
+colors default to red/green/blue/black (+ Reset Colors button), and Validate now checks triangles
+for slivers and flags near-duplicate vertices (Tool merges them -> "triangle was degenerate").
+The grid-based sky cap was tried and dropped: measuring showed the one-polygon cap makes no
+slivers and the grid cost ~9x the triangles. Tests: `tests/test_phase4.py`. Next: phase 5 (kit
+pieces: sockets, snapping, smart merge). Untested in the real UI: the prop brush modal.
+
 **v0.8.0 (user feedback):** blend painting moved to **vertex colors in Blender's own Vertex Paint
 mode**, like the Titamas add-on (the image-based Banana blend brush updated slowly and only
 redrew on navigation). Every terrain BSP now gets its **own terrain material** `<bsp>_terrain`
@@ -47,11 +55,7 @@ user's real Reach + Halo 3 Elite node lists to tune auto-matching.
 2. ✅ Sky shell generator, `+seam` generation/mirroring between BSPs, per-BSP limit meters
    (TODO later: calibrate meters from Tool's output)
 3. ✅ Height brush (with border lock) + terrain blend-map painting
-4. Prop library from a folder of GLBs (thumbnails, import once as master), prop painting into a
-   sub-collection under the master's collection (link new objects straight to the target
-   collection — the Titamas add-on's bug was linking to the active collection), shared mesh data,
-   name sync: base name + flags stored on the master, ticking a flag renames every copy
-   (e.g. `%tree` -> `%*tree`)
+4. ✅ Prop library, prop painting, name sync
 5. Modular kit pieces: sockets with profiles, snapping, smart merge at export on a temp copy
    (delete caps on connected sockets, weld loops, remove interior faces, fix T-junctions,
    re-validate), unconnected caps keep a configurable seal material (black/grey constant shader,
@@ -64,6 +68,25 @@ user's real Reach + Halo 3 Elite node lists to tune auto-matching.
    button (name duplicates + optional identical node setups, preview first, also images),
    shader tag existence check, material flag checkboxes, pie menu, build-style presets
 - The user does **not** want a walkable slope overlay.
+
+## Phase 4 details (banana/proplib.py)
+- **Library:** `scene.banana.prop_folder` + Scan -> `scene.banana_props` entries (uid, file, base
+  name cleaned from the file name, flags, suffix, mesh). Import happens once per prop
+  (`import_model`): glTF import, every mesh joined into one mesh with world transforms applied,
+  materials kept (rename them to shader names), imported objects deleted. Thumbnail: a same-named
+  .png/.jpg next to the model, else the model's first texture's preview.
+- **Collections:** per BSP, `<instances>/<full name>` (custom prop `banana_prop` = uid) holds the
+  master (`banana_master`), with `<full name>_painted` (`banana_painted`) under it. Painted copies
+  are linked straight into the painted sub-collection of the BSP they land on (never the active
+  collection — that was the Titamas add-on's bug).
+- **Names:** full name = `%` + flags (`*` no collision, `!` per-pixel, `?` per-vertex, `>` single
+  probe, + any extra flags) + base + suffix (e.g. `(4)`, `@30-20`). Any change renames mesh,
+  master, every copy and the collections (`rename_prop`); Blender's `.001` suffixes become `_001`
+  in the export. Flag meanings come from Microsoft's H3EK instance docs + the user's `%*` habit.
+- **Brush (`banana.prop_brush`, modal):** raycasts structure meshes (not shells/mirrors); each dab
+  scatters N copies in the circle (`Scatter.dab`): drop-raycast straight down for the surface,
+  min spacing via KD-tree, random yaw, scale range, optional align to the surface normal, sink.
+  Ctrl+click erases copies (never the master). One undo step per stroke.
 
 ## Phase 3 details (banana/terrain.py, banana/brush.py, banana/blendmap.py)
 - **New Terrain BSP:** creates a BSP (`terrain_000`, ...), a quad grid tile (normals up, custom
@@ -186,11 +209,13 @@ banana/limits.py       live limit meters, budgets, viewport overlay
 banana/terrain.py      terrain BSPs, Match Edge, Generate Seam, Terrain panel
 banana/brush.py        modal Set Height brush (+ dab math, border mask, shared-edge handling)
 banana/blendmap.py     vertex-color blend painting, per-BSP terrain material, preview nodes, TIFF bake
+banana/proplib.py      prop library, master/painted collections, name sync, prop brush
 banana/rig.py          Rig Convert (bone map, weights, conform, rebind, test pose, presets, panel)
 tests/run_tests.py     headless map/export tests (needs a Python with the bpy module)
 tests/test_rig.py      headless Rig Convert tests
 tests/test_phase2.py   headless sky shell / seam / meter tests
 tests/test_phase3.py   headless terrain BSP / brush math / blend map tests
+tests/test_phase4.py   headless prop library / scatter / name sync tests
 tools/build_zip.py     builds dist/banana-<version>.zip for Install Add-on
 ```
 

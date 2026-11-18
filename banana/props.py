@@ -97,6 +97,20 @@ class BananaScene(bpy.types.PropertyGroup):
         name="Seam Top", default="+seamsealer",
         description="Material for the sky-cap strip along the top of each seam, so the seam ends on real "
                     "geometry instead of +sky. Empty = plain +sky")
+    prop_folder: StringProperty(name="Prop Folder", subtype='DIR_PATH',
+                                description="Folder of .glb/.gltf models to use as props")
+    prop_radius: FloatProperty(name="Radius", default=8.0, min=0.1, subtype='DISTANCE')
+    prop_density: IntProperty(name="Per Dab", default=3, min=1, max=50,
+                              description="How many props each dab tries to place")
+    prop_spacing: FloatProperty(name="Min Spacing", default=3.0, min=0.0, subtype='DISTANCE',
+                                description="No two copies of a prop closer than this")
+    prop_scale_min: FloatProperty(name="Scale Min", default=0.9, min=0.01)
+    prop_scale_max: FloatProperty(name="Scale Max", default=1.1, min=0.01)
+    prop_random_yaw: BoolProperty(name="Random Rotation", default=True)
+    prop_align: BoolProperty(name="Align to Surface", default=False,
+                             description="Tilt props to the ground's slope (off: always upright, like trees)")
+    prop_sink: FloatProperty(name="Sink", default=0.0, subtype='DISTANCE',
+                             description="Push props this far into the ground")
     live_meters: BoolProperty(name="Live Meters", default=True,
                               description="Recount the limit meters shortly after you stop editing")
     lock_borders: BoolProperty(name="Lock Borders", default=True,

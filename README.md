@@ -51,6 +51,18 @@ You can also give any collection a role from the Outliner: right-click > Banana 
   (shown in Material Preview while painting). **Save Blend Map** (and every export) writes
   `bitmaps\<bsp>_blend.tif` with layers 1-4 in R/G/B/A.
 
+## Props (Banana > Props)
+- Pick a folder of `.glb`/`.gltf` models and press refresh: each becomes a prop. A `.png`/`.jpg`
+  with the same name next to a model is used as its thumbnail.
+- Set the prop's name and flags (`*` no collision, `!` per-pixel, `?` per-vertex, `>` single probe,
+  plus any other flags and a suffix like `(4)` or `@30-20`); the panel shows the exact Halo name.
+  Changing them renames the main object, every copy and the collections.
+- **Add to BSP** puts the main object at the 3D cursor, inside `instances/<name>`.
+- **Paint Props** scatters copies on terrain and structure (per dab count, minimum spacing, scale
+  range, random rotation, align to slope, sink). Ctrl+click erases. Copies always go into the
+  `<name>_painted` collection of the BSP they land on and share one mesh, so each BSP exports them
+  as one instance definition.
+
 ## Rig Convert
 Banana > **Rig Convert** moves a body skinned to one Halo skeleton (e.g. a Reach Elite) onto
 another (e.g. the Halo 3 Elite):
