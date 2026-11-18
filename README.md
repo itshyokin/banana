@@ -25,8 +25,8 @@ You can also give any collection a role from the Outliner: right-click > Banana 
 - **Build Sky Shells** (BSPs panel) seals each BSP's terrain border with `+sky` walls and a top cap
   at the shared Sky Height. Where two BSPs' terrain borders meet exactly, those walls become a
   matching seam pair automatically. Borders that almost meet are reported.
-- Seams are named for you on export: every `+seam` face becomes `+seam:<its BSP's name>`
-  (Halo 3 needs each half named after its own BSP).
+- Each BSP gets its own seam material, starting as `+seam`. Rename it yourself (BSPs > Sky & Seams
+  > Seam name); Banana keeps your name through rebuilds and exports it as is.
 - **Mirror Seam to BSP** copies a selected `+seam` object (e.g. a doorway between two BSPs)
   into the other BSP, facing the other way; the copy re-syncs on every export.
 - **Limits** shows live meters per BSP (triangles, vertices, instances, materials, portals, world

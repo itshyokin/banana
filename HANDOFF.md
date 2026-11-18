@@ -97,15 +97,12 @@ user's real Reach + Halo 3 Elite node lists to tune auto-matching.
   rebuild). Only the largest loop is sealed; other loops (holes) are reported as errors.
   Orientation copies the terrain's: each wall triangle walks its border edge opposite to the
   terrain face, the cap opposite to the walls, so terrain normals must point up (into play).
-- **Seam naming (confirmed by the user from c20, 2026-11-17):** the seam material name must match
-  the BSP it ends up in, e.g. `+seam:030_BSP_000`. So the two halves of a pair have *different*
-  names (`+seam:bsp_a` in bsp_a, `+seam:bsp_b` in bsp_b). A shared name (`+seam:hall` on both
-  sides) gave "unpaired seam" in Sapien. Banana now rewrites every `+seam...` material to
-  `+seam:<BSP file name>` on export, so the Blender material name doesn't matter; pairing is
-  validated by geometry (identical triangles in exactly one other BSP, opposite facing).
+- **Seam naming:** c20 (found by the user) says the seam material name must match the BSP name,
+  e.g. `+seam:030_BSP_000`; the doorway test paired once each half was named after its own BSP.
+  Since v0.6.0 the user names seams by hand (see Lessons learned); Banana no longer renames them.
 - **Seams are only made on request** (Generate Seam, or `build_sky_shell(auto_seams=True)`): a
-  border edge that exactly matches the partner BSP's border edge (rounded to 1e-4) gets
-  `+seam:<own bsp>` walls. Rebuilding shells keeps existing seams only. Wall triangles always use the
+  border edge that exactly matches the partner BSP's border edge (rounded to 1e-4) gets walls with
+  the BSP's own seam material (user-named). Rebuilding shells keeps existing seams only. Wall triangles always use the
   diagonal from the lexicographically lower vertex, so both BSPs produce identical triangles;
   each side faces into its own BSP (Microsoft docs: matching seams need the same triangulation,
   coincident vertices, opposite normals, normals pointing into the BSP).
@@ -179,6 +176,14 @@ tools/build_zip.py     builds dist/banana-<version>.zip for Install Add-on
 - Also avoid creating/removing datablocks while holding evaluated objects (append with
   `bm.from_mesh` + `bmesh.ops.transform` instead of `mesh.copy()`), and read evaluated meshes via
   `to_mesh()`/`to_mesh_clear()` rather than `eval_obj.data` (Edit Mode safety).
+- **v0.6.0 — seams are named by the user, not by Banana.** Seams still came through unpaired for
+  the user, so at their request automatic seam naming was removed entirely. Generate Seam gives
+  each BSP its own seam material (`bsp.banana.seam_material`), created as `+seam` / `+seam.001`;
+  the user renames it (sidebar: BSPs > Sky & Seams > Seam name). Rebuilds reuse that material, so
+  the name sticks. Mirror Seam gives the mirrored side its own copy of the material, and re-syncs
+  keep whatever it's been renamed to. Export writes material names as they are (only `.001`-style
+  suffixes stripped). Validate warns while a seam is still called plain `+seam`. Seam pairing is
+  still validated by geometry. Open question for the user: what naming finally pairs in Tool.
 - **v0.5.4 (root cause of the extra unpaired seam):** the sky shell was often what got clicked,
   so New Terrain didn't see a terrain selected, silently unticked "Next to Selected" and put the
   new tile at the origin *under* the first one. Generate Seam then rebuilt shells against *every*

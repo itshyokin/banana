@@ -163,10 +163,22 @@ def check_border_alignment(context, bsps):
     return out
 
 
+SEAM_DEFAULT = "+seam"
+
+
+def bsp_seam_material(bsp):
+    """This BSP's own seam material. Created once as '+seam' (Blender makes it '+seam.001' etc.
+    if that name is taken); after that whatever the user renames it to is kept and exported as is."""
+    mat = bsp.banana.seam_material
+    if mat is None or mat.name not in bpy.data.materials:
+        mat = bpy.data.materials.new(SEAM_DEFAULT)
+        mat.diffuse_color = (1.0, 0.2, 0.8, 1.0)  # easy to spot in solid view
+        bsp.banana.seam_material = mat
+    return mat
+
+
 def seam_name(bsp, _other):
-    """Each BSP gets its own seam material named after itself, exactly what the export writes
-    (c20: the seam material name must match the BSP it ends up in)."""
-    return "+seam:" + bpy.path.clean_name(bsp.name)
+    return bsp_seam_material(bsp).name
 
 
 def material(name):
@@ -358,6 +370,12 @@ def sync_seam_partner(context, partner):
         eval_obj.to_mesh_clear()
     new = bpy.data.meshes.new(partner.name)
     new.from_pydata(verts, [], tris)
+    kept = list(partner.data.materials)
+    if len(kept) == len(slots) and all(m is not None for m in kept):
+        slots = kept  # keep whatever the user named the mirrored side
+    else:
+        # first sync: give the mirrored side its own seam material(s) to rename
+        slots = [m.copy() if (m is not None and m.name.startswith("+seam")) else m for m in slots]
     for m in slots:
         new.materials.append(m)
     if mats:

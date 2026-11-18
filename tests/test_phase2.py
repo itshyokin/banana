@@ -116,8 +116,14 @@ def test_two_bsps_seam():
     written_a, _r = export.export_bsp(ctx, a)
     written_b, _r = export.export_bsp(ctx, b)
     ta, tb = open(written_a[0]).read(), open(written_b[0]).read()
-    check('"+seam:bsp_a"' in ta and '"+seam:bsp_b"' in tb and "+seam:bsp_b" not in ta,
-          "each half is named after its own BSP (+seam:bsp_a / +seam:bsp_b)")
+    ma, mb = a.banana.seam_material, b.banana.seam_material
+    check(ma is not None and mb is not None and ma is not mb, "each BSP got its own seam material")
+    ma.name, mb.name = "+seam:my_a", "+seam:my_b"  # the user names them
+    written_a, _r = export.export_bsp(ctx, a)
+    written_b, _r = export.export_bsp(ctx, b)
+    ta, tb = open(written_a[0]).read(), open(written_b[0]).read()
+    check('"+seam:my_a"' in ta and '"+seam:my_b"' in tb and "my_b" not in ta,
+          "export writes the names the user chose")
 
     # break the edge match: nudge a border vertex in B, rebuild, seams must complain
     g = bpy.data.objects["ground_b"]
@@ -155,13 +161,17 @@ def test_mirror_seam():
     mats = partner[0].data.materials
     check(all(m is not None and not m.is_evaluated for m in mats), "partner uses the real material, not a temporary copy (crash fix)")
 
+    pm = partner[0].data.materials[0]
+    check(pm is not door.data.materials[0], "mirrored side has its own seam material to rename")
+    pm.name = "+seam:side_b"
     wa, _r = export.export_bsp(ctx, a)
     wb, _r = export.export_bsp(ctx, b)
-    check('"+seam:bsp_a"' in open(wa[0]).read() and '"+seam:bsp_b"' in open(wb[0]).read(),
-          "mirrored pair exports as +seam:bsp_a / +seam:bsp_b even though the material is +seam:hall")
+    check('"+seam:hall"' in open(wa[0]).read() and '"+seam:side_b"' in open(wb[0]).read(),
+          "each side exports with its own name")
     door.location.y = 1.0  # move the original; export re-syncs the partner
     bpy.ops.banana.export(all_bsps=True)
     check(not sky.check_seams(ctx, [a, b]), "partner follows the original after export")
+    check(partner[0].data.materials[0].name == "+seam:side_b", "re-sync keeps the name you gave the mirrored side")
 
 
 def test_meters():

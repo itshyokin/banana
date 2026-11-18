@@ -28,10 +28,7 @@ def material_name(mat, bsp):
     if mat is None:
         return None
     name = naming.strip_suffix(mat.name)
-    if name.startswith("+seam"):
-        # c20: the seam material name must match the BSP it ends up in, so each half of a
-        # pair is named after its own BSP no matter what the Blender material is called
-        return "+seam:" + bsp_file_name(bsp)
+    # seam materials are exported exactly as the user named them
     return naming.sky_material(name, bsp.banana.sky_index)
 
 

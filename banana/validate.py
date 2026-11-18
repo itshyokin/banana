@@ -127,6 +127,8 @@ def check_materials(context, bsp, objs, has_portals, res):
             final = material_name(mat, bsp)
             if final.startswith("+sky"):
                 skies.add(final)
+            if final == "+seam":
+                res.add('WARNING', "Seam material '%s' still has the default name; rename it (e.g. +seam:<bsp name>)" % mat.name, obj.name)
             if naming.has_blender_suffix(mat.name):
                 res.add('WARNING', "Material '%s' is a duplicate; it exports as '%s'" % (mat.name, final), obj.name)
             base = final.split(":")[0]

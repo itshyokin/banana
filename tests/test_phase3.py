@@ -102,12 +102,20 @@ def test_terrain_bsps():
     check(not sky.check_seams(ctx, [a, b]), "seam pair matches")
     for bsp in (a, b):
         check(not errors(validate.validate_bsp(ctx, bsp)), "%s still sealed" % bsp.name)
-    names_a = {m.name for o in bsp_mod.objects_for_role(a, 'STRUCTURE') for m in o.data.materials if m and m.name.startswith("+seam")}
-    names_b = {m.name for o in bsp_mod.objects_for_role(b, 'STRUCTURE') for m in o.data.materials if m and m.name.startswith("+seam")}
-    check(names_a == {"+seam:terrain_a"} and names_b == {"+seam:terrain_b"}, "each BSP has its own seam material in Blender too")
+    mats_a = {m for o in bsp_mod.objects_for_role(a, 'STRUCTURE') for m in o.data.materials if m and m.name.startswith("+seam")}
+    mats_b = {m for o in bsp_mod.objects_for_role(b, 'STRUCTURE') for m in o.data.materials if m and m.name.startswith("+seam")}
+    check(len(mats_a) == 1 and len(mats_b) == 1 and mats_a != mats_b, "each BSP has its own default seam material")
+    check({m.name for m in mats_a | mats_b} == {"+seam", "+seam.001"}, "named +seam / +seam.001 until renamed")
+    res = validate.validate_bsp(ctx, a)
+    check(any("default name" in i[1] for i in res.items if i[0] == 'WARNING'), "Validate reminds you to name it")
+    a.banana.seam_material.name = "+seam:my_name"
+    select(a_obj, b_obj)
+    bpy.ops.banana.generate_seam()
+    check({m.name for o in bsp_mod.objects_for_role(a, 'STRUCTURE') for m in o.data.materials if m and m.name.startswith("+seam")}
+          == {"+seam:my_name"}, "rebuilding keeps your name")
     written, _r = export.export_bsp(ctx, a)
     text = open(written[0]).read()
-    check(text.count('"+seam:terrain_a"') == 1 and "+seam:terrain_b" not in text, "exports exactly one seam material, +seam:terrain_a")
+    check(text.count('"+seam:my_name"') == 1 and '"+seam"' not in text, "exports your name exactly")
 
     # a third terrain north of A keeps A's seam with B when joined
     select(a_obj)

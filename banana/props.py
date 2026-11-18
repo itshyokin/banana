@@ -144,6 +144,9 @@ class BananaCollection(bpy.types.PropertyGroup):
         name="Terrain Shader", default="terrain",
         description="Name of this BSP's shader_terrain tag; new tiles and the blend-map preview use it")
     blend_resolution: IntProperty(name="Blend Map Size", default=1024, min=64, max=8192)
+    seam_material: PointerProperty(
+        name="Seam Material", type=bpy.types.Material,
+        description="This BSP's seam material (created by Generate Seam as '+seam'; rename it as you like)")
     blend_set: BoolProperty(default=False)
     blend_min: FloatVectorProperty(size=2)
     blend_max: FloatVectorProperty(size=2)
