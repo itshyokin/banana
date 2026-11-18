@@ -198,6 +198,66 @@ def test_fine_spacing_seam():
         check(not errors(validate.validate_bsp(ctx, bsp)), "%s sealed" % bsp.name)
 
 
+def _paint(obj, target, strength=0.8, steps=30, rings=2, shared=frozenset()):
+    mask = brush.border_mask(obj.data, rings, shared)
+    c = obj.matrix_world.translation
+    for _ in range(steps):
+        brush.height_dab(obj, (c.x, c.y), 1000.0, target, strength, mask)
+
+
+def test_blend_edge_and_paint_across():
+    print("Match Edge blends heights; the brush paints across joined edges")
+    s = reset()
+    ctx = bpy.context
+    select(None)
+    bpy.ops.banana.new_terrain('EXEC_DEFAULT', name="ea", size_x=40, size_y=40, spacing=2, next_to_selected=False)
+    ea = ctx.active_object
+    bpy.ops.banana.new_terrain('EXEC_DEFAULT', name="eb", size_x=40, size_y=40, spacing=2, next_to_selected=True, side='+X')
+    eb = ctx.active_object
+    _paint(ea, 8.0)
+    _paint(eb, 4.0)
+    mw = ea.matrix_world
+    mid_i = [v.index for v in ea.data.vertices if abs((mw @ v.co).x - 20.0) < 1e-4 and abs((mw @ v.co).y) < 1e-4][0]
+    zmid = lambda: (ea.matrix_world @ ea.data.vertices[mid_i].co).z
+    check(abs(zmid()) < 1e-6, "before: locked edge sits at the bottom (the valley)")
+    select(ea, eb)
+    bpy.ops.banana.generate_seam(rows=3)
+    z = zmid()
+    check(abs(z - 6.0) < 0.05, "edge lifted to the average of both sides (%.2f, want 6)" % z)
+    row = sorted(((mw @ v.co).x, (mw @ v.co).z) for v in ea.data.vertices if abs((mw @ v.co).y) < 1e-4 and (mw @ v.co).x > 10)
+    zs = [z for _x, z in row]
+    check(all(abs(zs[i + 1] - zs[i]) < 1.5 for i in range(len(zs) - 1)), "smooth ramp, no cliff: %s" % [round(z, 1) for z in zs[-6:]])
+    a, b = bsp_mod.bsp_of(ea, ctx.scene), bsp_mod.bsp_of(eb, ctx.scene)
+    check(not sky.check_seams(ctx, [a, b]), "seam rebuilt and still pairs")
+    for bsp in (a, b):
+        check(not errors(validate.validate_bsp(ctx, bsp)), "%s sealed after blending" % bsp.name)
+    ends = [v for v in ea.data.vertices if abs((mw @ v.co).x - 20.0) < 1e-4 and abs(abs((mw @ v.co).y) - 20.0) < 1e-4]
+    check(all(abs((mw @ v.co).z) < 1e-6 for v in ends), "edge end corners stay put")
+
+    # brush across the joined edge: shared edge is free, both sides move together
+    shared = brush.shared_vertices([ea, eb])
+    check(len(shared[ea.name]) == 21 and len(shared[eb.name]) == 21, "21 shared edge vertices found on each side")
+    masks = {o.name: brush.border_mask(o.data, 2, shared[o.name]) for o in (ea, eb)}
+    check(masks[ea.name][mid_i] == 0.0, "shared edge isn't locked")
+    import types
+    fake = types.SimpleNamespace(objects=[ea, eb], shared=shared,
+                                 shared_before={o.name: [o.data.vertices[i].co.z for i in sorted(shared[o.name])] for o in (ea, eb)},
+                                 report=lambda *a: None)
+    weld = 0.01 / s.scale()
+    everyone = bsp_mod.find_bsps(ctx.scene)
+    fake.seam_plans = {x.name: sky.existing_seam_partners(ctx, x, [o for o in everyone if o is not x], weld) for x in everyone}
+    for o in (ea, eb):
+        brush.height_dab(o, (20.0, 0.0), 6.0, 12.0, 1.0, masks[o.name])
+    za = zmid()
+    vb = [v for v in eb.data.vertices if abs((eb.matrix_world @ v.co).x - 20.0) < 1e-4 and abs((eb.matrix_world @ v.co).y) < 1e-4][0]
+    zb = (eb.matrix_world @ vb.co).z
+    check(abs(za - 12.0) < 1e-4 and za == zb, "edge painted to 12 m on both sides, identical (%.3f / %.3f)" % (za, zb))
+    brush.BANANA_OT_terrain_brush._rebuild_moved_edges(fake, ctx)
+    check(not sky.check_seams(ctx, [a, b]), "skies rebuilt after the stroke; seam still pairs")
+    for bsp in (a, b):
+        check(not errors(validate.validate_bsp(ctx, bsp)), "%s sealed after painting across" % bsp.name)
+
+
 def test_height_dab():
     print("set height brush math")
     reset()
@@ -277,6 +337,7 @@ if __name__ == "__main__":
     test_terrain_bsps()
     test_selection_via_shell()
     test_fine_spacing_seam()
+    test_blend_edge_and_paint_across()
     test_height_dab()
     test_blend_brush_and_preview()
     print("\n%s" % ("ALL PASSED" if not FAILS else "%d FAILED" % len(FAILS)))

@@ -320,7 +320,12 @@ class BANANA_OT_build_sky_shell(bpy.types.Operator):
             self.report({'ERROR'}, "No BSP")
             return {'CANCELLED'}
         if s.sky_height_auto:
-            s.sky_height = auto_sky_height(context)
+            needed = auto_sky_height(context)
+            # rebuilding every sky can settle on any height; rebuilding one BSP may only raise
+            # it, and then the others must follow so seams keep a level top
+            if self.all_bsps or needed > s.sky_height + 1e-6:
+                s.sky_height = needed
+                bsps = bsp_mod.find_bsps(context.scene)
         weld = 0.01 / s.scale()
         everyone = bsp_mod.find_bsps(context.scene)
         keys = {b.name: border_edge_keys(context, b, weld) for b in everyone}

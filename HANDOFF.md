@@ -64,10 +64,19 @@ user's real Reach + Halo 3 Elite node lists to tune auto-matching.
   plain sky shell (`build_shell(..., neighbors=[])`, so no seam yet). "Next to Selected Terrain"
   places it edge to edge on a side, forces the shared size/spacing and snaps the edge to the
   neighbor (`match_edge`).
-- **Match Edge:** two terrains selected in two BSPs; the other one's border vertices snap (x, y, z)
-  to the active one's nearest border vertex within Snap Distance (XY KD-tree).
-- **Generate Seam:** Match Edge, then rebuild both shells against every neighbor they touch (so
-  existing seams with other BSPs survive) -> shared edge becomes a +seam pair.
+- **Match Edge (v0.7.0):** two terrains selected in two BSPs (clicking anything in a terrain BSP
+  counts). (1) Seam plans for both BSPs are captured *first* (`_plan_seams`; after heights move,
+  old seams can't be found). (2) Snap: the other one's border verts snap (x, y, z) to the active
+  one's nearest border vertex (XY KD-tree, distance capped at 40% of spacing). (3) Blend Heights
+  (default on, user asked for it because the locked edge left a valley between the BSPs):
+  `blend_edge` sets each shared edge vertex to the average of the first free row on each side
+  (row `rows+1`) and ramps `rows` rows on each side linearly to it; the edge's two end vertices
+  stay put (they may be corners shared with other BSPs). (4) Both skies are rebuilt with their
+  planned seams (`_rebuild`).
+- **Generate Seam:** same as Match Edge, plus the pair is added to each side's seam partners.
+- **Sky height (v0.7.0):** auto height only ever goes *up* (`raise_sky_if_needed`); when it does,
+  every terrain sky is rebuilt with its seams so all tops stay level. Rebuilding one BSP's sky can
+  never lower it. Rebuild Sky Shells (all) may settle on any height since it rebuilds everything.
 - **Terrain brush (`banana.terrain_brush`, modal, brush.py):** raycasts only terrain objects
   (sky shells don't block it), draws a circle cursor (gpu POST_VIEW), header shows keys.
   HEIGHT: `height_dab` moves verts within the radius (XY distance) toward the target world Z with

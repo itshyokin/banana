@@ -38,13 +38,21 @@ def falloff(u):
     return (1.0 - u * u) ** 2
 
 
-def border_mask(mesh, rings=2):
-    """1.0 on border vertices, fading to 0 over `rings` rings of neighbors."""
+def border_mask(mesh, rings=2, shared=frozenset()):
+    """1.0 on border vertices, fading to 0 over `rings` rings of neighbors.
+    Border edges whose two vertices are both in `shared` (an edge joined to another terrain)
+    stay free, so the brush can paint across the join; their end corners stay locked."""
     bm = bmesh.new()
     bm.from_mesh(mesh)
     bm.verts.ensure_lookup_table()
     mask = np.zeros(len(bm.verts), np.float32)
-    front = {v for e in bm.edges if len(e.link_faces) == 1 for v in e.verts}
+    front = set()
+    for e in bm.edges:
+        if len(e.link_faces) != 1:
+            continue
+        if e.verts[0].index in shared and e.verts[1].index in shared:
+            continue
+        front.update(e.verts)
     seen = set(front)
     for v in front:
         mask[v.index] = 1.0
@@ -61,6 +69,23 @@ def border_mask(mesh, rings=2):
         front = nxt
     bm.free()
     return mask
+
+
+def shared_vertices(objs):
+    """{object name: set of border vertex indices that sit on another terrain's border}."""
+    from . import terrain as terrain_mod
+    border_pos = {}
+    for obj in objs:
+        mw = obj.matrix_world
+        for i in terrain_mod.border_indices(obj.data):
+            w = mw @ obj.data.vertices[i].co
+            border_pos.setdefault(terrain_mod._key(w.x, w.y), []).append((obj.name, i))
+    out = {obj.name: set() for obj in objs}
+    for members in border_pos.values():
+        if len({m[0] for m in members}) > 1:
+            for name, i in members:
+                out[name].add(i)
+    return out
 
 
 def height_dab(obj, center, radius, target, strength, mask=None):
@@ -257,7 +282,16 @@ class BANANA_OT_terrain_brush(bpy.types.Operator):
                 for obj in blendmap.terrain_objects(bsp):
                     if obj not in self.objects:
                         self.objects.append(obj)
-            self.masks = {o.name: border_mask(o.data, s.border_rings) for o in self.objects} if s.lock_borders else {}
+            self.shared = shared_vertices(self.objects)
+            self.masks = ({o.name: border_mask(o.data, s.border_rings, self.shared[o.name]) for o in self.objects}
+                          if s.lock_borders else {})
+            # remember shared-edge heights and every BSP's seam partners, to rebuild skies after
+            self.shared_before = {o.name: [o.data.vertices[i].co.z for i in sorted(self.shared[o.name])] for o in self.objects}
+            from . import sky
+            weld = 0.01 / s.scale()
+            everyone = bsp_mod.find_bsps(context.scene)
+            self.seam_plans = {b.name: sky.existing_seam_partners(context, b, [o for o in everyone if o is not b], weld)
+                               for b in everyone}
         else:
             self.bsp = s.active_bsp
             if self.bsp is None:
@@ -285,9 +319,26 @@ class BANANA_OT_terrain_brush(bpy.types.Operator):
         s.brush_radius = self.radius
         context.area.tag_redraw()
         if self.mode == 'HEIGHT':
+            self._rebuild_moved_edges(context)
             top = max((max((o.matrix_world @ Vector(c)).z for c in o.bound_box) for o in self.objects), default=0.0)
-            if top > s.sky_height - 1.0:
-                self.report({'WARNING'}, "Terrain now reaches the sky (%.1f m); press Rebuild All Skies" % top)
+            if top > s.sky_height - 1.0 and not s.sky_height_auto:
+                self.report({'WARNING'}, "Terrain now reaches the sky (%.1f m); raise Sky Height and rebuild skies" % top)
+
+    def _rebuild_moved_edges(self, context):
+        """Painting across a joined edge moves the bottom of its seam: rebuild those skies."""
+        from . import terrain as terrain_mod
+        moved = set()
+        for o in self.objects:
+            now = [o.data.vertices[i].co.z for i in sorted(self.shared.get(o.name, ()))]
+            if now != self.shared_before.get(o.name, now):
+                bsp = bsp_mod.bsp_of(o, context.scene)
+                if bsp is not None:
+                    moved.add(bsp.name)
+        if not moved:
+            return
+        plans = {name: self.seam_plans.get(name, []) for name in moved}
+        terrain_mod._rebuild(context, plans)
+        self.report({'INFO'}, "Rebuilt the skies of %s to follow the painted edges" % ", ".join(sorted(moved)))
 
     def modal(self, context, event):
         try:

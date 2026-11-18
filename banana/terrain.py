@@ -14,7 +14,7 @@ With two terrain BSPs selected:
 import bpy
 import bmesh
 import numpy as np
-from bpy.props import BoolProperty, EnumProperty, FloatProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, StringProperty
 from mathutils import Vector
 from mathutils.kdtree import KDTree
 
@@ -113,6 +113,93 @@ def match_edge(target, source, tolerance):
             source.data.vertices[i].co = inv @ pts[k]
             moved += 1
     source.data.update()
+    return moved
+
+
+def _xy_tree(obj):
+    mw = obj.matrix_world
+    pts = [mw @ v.co for v in obj.data.vertices]
+    tree = KDTree(len(pts))
+    for i, p in enumerate(pts):
+        tree.insert(Vector((p.x, p.y, 0.0)), i)
+    tree.balance()
+    return tree, pts
+
+
+def shared_edge(a_obj, b_obj):
+    """[(index in a, index in b, world xy)] for border vertices both terrains share,
+    ordered along the edge."""
+    amw, bmw = a_obj.matrix_world, b_obj.matrix_world
+    b_border = {}
+    for i in border_indices(b_obj.data):
+        w = bmw @ b_obj.data.vertices[i].co
+        b_border[_key(w.x, w.y)] = i
+    pairs = []
+    for i in border_indices(a_obj.data):
+        w = amw @ a_obj.data.vertices[i].co
+        j = b_border.get(_key(w.x, w.y))
+        if j is not None:
+            pairs.append((i, j, Vector((w.x, w.y))))
+    if len(pairs) < 2:
+        return pairs
+    # order along the edge's main direction
+    xs = [p[2].x for p in pairs]
+    ys = [p[2].y for p in pairs]
+    axis = 0 if (max(xs) - min(xs)) >= (max(ys) - min(ys)) else 1
+    pairs.sort(key=lambda p: p[2][axis])
+    return pairs
+
+
+def blend_edge(a_obj, b_obj, rows):
+    """Lift the shared edge to meet both terrains: the edge goes to the average of the first
+    free row on each side, and `rows` rows on each side ramp smoothly to it. The edge's two
+    end vertices stay put (they may be corners shared with other BSPs). Returns vertices moved."""
+    pairs = shared_edge(a_obj, b_obj)
+    if len(pairs) < 3:
+        return 0
+    spacing = min(a_obj[TILE_KEY].get("spacing", 1.0), b_obj[TILE_KEY].get("spacing", 1.0))
+    direction = (pairs[-1][2] - pairs[0][2]).normalized()
+    perp = Vector((-direction.y, direction.x))
+    mid = (pairs[0][2] + pairs[-1][2]) / 2
+    a_center = (a_obj.matrix_world @ Vector(a_obj.bound_box[0]) + a_obj.matrix_world @ Vector(a_obj.bound_box[6])) / 2
+    a_in = perp if (Vector((a_center.x, a_center.y)) - mid).dot(perp) > 0 else -perp
+    sides = ((a_obj, a_in), (b_obj, -a_in))
+    trees = {obj.name: _xy_tree(obj) for obj, _d in sides}
+    changes = {a_obj.name: {}, b_obj.name: {}}
+    for ia, ib, e in pairs[1:-1]:
+        columns = []
+        for obj, inward in sides:
+            tree, pts = trees[obj.name]
+            col = []
+            for k in range(1, rows + 2):
+                target = e + inward * spacing * k
+                _co, idx, dist = tree.find(Vector((target.x, target.y, 0.0)))
+                if idx is None or dist > spacing * 0.3:
+                    col = None
+                    break
+                col.append(idx)
+            if col is None:
+                break
+            columns.append((obj, col, pts))
+        if len(columns) != 2:
+            continue
+        free = [pts[col[-1]].z for _obj, col, pts in columns]
+        h = (free[0] + free[1]) / 2.0
+        changes[a_obj.name][ia] = h
+        changes[b_obj.name][ib] = h
+        for (obj, col, pts), z_free in zip(columns, free):
+            for k, idx in enumerate(col[:-1], start=1):
+                changes[obj.name][idx] = h + (z_free - h) * k / (rows + 1)
+    moved = 0
+    for obj, _d in sides:
+        mw = obj.matrix_world
+        inv = mw.inverted()
+        for idx, z in changes[obj.name].items():
+            w = mw @ obj.data.vertices[idx].co
+            if abs(w.z - z) > 1e-7:
+                obj.data.vertices[idx].co = inv @ Vector((w.x, w.y, z))
+                moved += 1
+        obj.data.update()
     return moved
 
 
@@ -226,8 +313,9 @@ class BANANA_OT_new_terrain(bpy.types.Operator):
             context.view_layer.update()
 
         s = context.scene.banana
-        if s.sky_height_auto:
-            s.sky_height = sky.auto_sky_height(context)
+        if s.sky_height_auto and s.sky_height < sky.auto_sky_height(context) - 1e-6:
+            # only happens if this tile starts above everything else
+            _rebuild(context, {})
         _shell, msgs = sky.build_shell(context, bsp, s.sky_height, neighbors=[])
         s.active_bsp = bsp
         for other in context.selected_objects:
@@ -241,67 +329,123 @@ class BANANA_OT_new_terrain(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class BANANA_OT_match_edge(bpy.types.Operator):
-    """Snap the other selected terrain's edge onto the active terrain's edge (position and height)"""
+def _plan_seams(context, a, b, join):
+    """Seam partners for every BSP that will be rebuilt, captured *before* any height changes
+    (afterwards old seams no longer line up with the moved edge, so they couldn't be found)."""
+    from . import sky
+    s = context.scene.banana
+    weld = 0.01 / s.scale()
+    everyone = bsp_mod.find_bsps(context.scene)
+    plans = {}
+    for bsp, partner in ((a, b), (b, a)):
+        others = [o for o in everyone if o is not bsp]
+        current = sky.existing_seam_partners(context, bsp, others, weld)
+        if join and partner not in current:
+            current = [partner] + current
+        plans[bsp.name] = current
+    return plans
+
+
+def raise_sky_if_needed(context):
+    """Auto sky height only ever goes up, so existing seams keep their top edge.
+    Returns True if it went up (then every sky must be rebuilt)."""
+    from . import sky
+    s = context.scene.banana
+    if not s.sky_height_auto:
+        return False
+    needed = sky.auto_sky_height(context)
+    if needed > s.sky_height + 1e-6:
+        s.sky_height = needed
+        return True
+    return False
+
+
+def _rebuild(context, plans):
+    """Rebuild the planned skies. If the sky had to go up, rebuild every sky (keeping each
+    one's seams) so all tops stay level."""
+    from . import sky
+    s = context.scene.banana
+    weld = 0.01 / s.scale()
+    everyone = bsp_mod.find_bsps(context.scene)
+    plans = dict(plans)
+    if s.sky_height_auto and sky.auto_sky_height(context) > s.sky_height + 1e-6:
+        for b in everyone:  # plan before any shell is replaced
+            if b.name not in plans and sky.terrain_objects(b):
+                plans[b.name] = sky.existing_seam_partners(context, b, [o for o in everyone if o is not b], weld)
+        raise_sky_if_needed(context)
+    lines = []
+    by_name = {b.name: b for b in everyone}
+    for name, partners in plans.items():
+        bsp = by_name.get(name)
+        if bsp is None:
+            continue
+        neighbors = [(o, sky.border_edge_keys(context, o, weld)) for o in partners]
+        _obj, msgs = sky.build_shell(context, bsp, s.sky_height, neighbors)
+        lines.extend(msgs)
+    return lines
+
+
+class _EdgeOptions:
+    tolerance: FloatProperty(name="Snap Distance", default=1.0, min=0.0, subtype='DISTANCE',
+                             description="Edge vertices this close (sideways) to the active terrain's edge get snapped")
+    blend: BoolProperty(name="Blend Heights", default=True,
+                        description="Lift the shared edge to meet both terrains, with a smooth ramp on each side")
+    rows: IntProperty(name="Blend Rows", default=3, min=1, max=50,
+                      description="How many rows of vertices on each side ramp up to the edge")
+
+    def _prepare(self, context, join):
+        if context.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        active, other, err = _two_terrains(context)
+        if err:
+            return None, None, None, None, err
+        from . import sky
+        a = bsp_mod.bsp_of(active, context.scene)
+        b = bsp_mod.bsp_of(other, context.scene)
+        overlaps = sky.check_overlaps(context, [a, b])
+        if overlaps:
+            return None, None, None, None, overlaps[0][1]
+        plans = _plan_seams(context, a, b, join)
+        match_edge(active, other, safe_tolerance(active, other, self.tolerance))
+        blended = blend_edge(active, other, self.rows) if self.blend else 0
+        context.view_layer.update()
+        return active, other, plans, blended, None
+
+
+class BANANA_OT_match_edge(_EdgeOptions, bpy.types.Operator):
+    """Snap the other terrain's edge onto the active one and blend the heights across it (skies and existing seams are rebuilt to fit)"""
     bl_idname = "banana.match_edge"
     bl_label = "Match Edge"
     bl_options = {'REGISTER', 'UNDO'}
 
-    tolerance: FloatProperty(name="Snap Distance", default=1.0, min=0.0, subtype='DISTANCE',
-                             description="Edge vertices this close (sideways) to the active terrain's edge get snapped")
-
     def execute(self, context):
-        if context.mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode='OBJECT')
-        active, other, err = _two_terrains(context)
+        active, other, plans, blended, err = self._prepare(context, join=False)
         if err:
             self.report({'ERROR'}, err)
             return {'CANCELLED'}
-        moved = match_edge(active, other, safe_tolerance(active, other, self.tolerance))
-        self.report({'INFO'}, "Matched %d edge vertices of %s to %s" % (moved, other.name, active.name))
+        for sev, m in _rebuild(context, plans):
+            if sev == 'ERROR':
+                self.report({'WARNING'}, m)
+        self.report({'INFO'}, "Matched %s and %s%s" % (
+            active.name, other.name, (" (%d vertices blended)" % blended) if blended else ""))
         return {'FINISHED'}
 
 
-class BANANA_OT_generate_seam(bpy.types.Operator):
-    """Join two selected terrain BSPs: match the shared edge and rebuild both sky shells with a seam there"""
+class BANANA_OT_generate_seam(_EdgeOptions, bpy.types.Operator):
+    """Join two selected terrain BSPs: match and blend the shared edge, then rebuild both skies with a seam there"""
     bl_idname = "banana.generate_seam"
     bl_label = "Generate Seam"
     bl_options = {'REGISTER', 'UNDO'}
 
-    tolerance: FloatProperty(name="Snap Distance", default=1.0, min=0.0, subtype='DISTANCE')
-
     def execute(self, context):
         from . import sky
-        if context.mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode='OBJECT')
-        active, other, err = _two_terrains(context)
+        active, other, plans, _blended, err = self._prepare(context, join=True)
         if err:
             self.report({'ERROR'}, err)
             return {'CANCELLED'}
-        match_edge(active, other, safe_tolerance(active, other, self.tolerance))
-        context.view_layer.update()
         a = bsp_mod.bsp_of(active, context.scene)
         b = bsp_mod.bsp_of(other, context.scene)
-        s = context.scene.banana
-        if s.sky_height_auto:
-            s.sky_height = sky.auto_sky_height(context)
-        weld = 0.01 / s.scale()
-        everyone = bsp_mod.find_bsps(context.scene)
-        overlaps = sky.check_overlaps(context, [a, b])
-        if overlaps:
-            self.report({'ERROR'}, overlaps[0][1])
-            return {'CANCELLED'}
-        lines = []
-        # each side seams with the other one, plus any BSP it's already seamed to (so those
-        # seams survive); never with other touching BSPs whose shells still have sky walls there
-        plans = {}
-        for bsp, partner in ((a, b), (b, a)):
-            others = [o for o in everyone if o is not bsp and o is not partner]
-            plans[bsp.name] = [partner] + sky.existing_seam_partners(context, bsp, others, weld)
-        for bsp in (a, b):
-            neighbors = [(o, sky.border_edge_keys(context, o, weld)) for o in plans[bsp.name]]
-            _obj, msgs = sky.build_shell(context, bsp, s.sky_height, neighbors)
-            lines.extend(msgs)
+        lines = _rebuild(context, plans)
         problems = [m for sev, m in lines if sev == 'ERROR']
         problems += [m for _s, m, _b in sky.check_border_alignment(context, [a, b])]
         for m in problems[:4]:
@@ -310,7 +454,7 @@ class BANANA_OT_generate_seam(bpy.types.Operator):
         if shared == 0:
             self.report({'WARNING'}, "No shared edge between %s and %s; are they touching?" % (a.name, b.name))
             return {'FINISHED'}
-        self.report({'INFO'}, "Seam between %s and %s (%d edge segments)" % (a.name, b.name, shared))
+        self.report({'INFO'}, "Seam between %s and %s" % (a.name, b.name))
         return {'FINISHED'}
 
 

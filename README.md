@@ -35,8 +35,10 @@ You can also give any collection a role from the Outliner: right-click > Banana 
 ## Terrain (Banana > Terrain)
 - **New Terrain BSP** makes a new BSP with a flat terrain tile and its own sky. With a terrain
   selected, the new one can go right next to it with a matching edge.
-- Select two terrains (in two BSPs): **Match Edge** snaps the other edge onto the active one;
-  **Generate Seam** matches the edge and turns it into a seam. **Rebuild All Skies** after
+- Select two terrains (in two BSPs): **Match Edge** snaps the other edge onto the active one and
+  blends the heights across it (Blend Rows sets how wide the ramp is, in the Adjust Last Operation
+  panel); **Generate Seam** does the same and turns the edge into a seam. Skies follow automatically.
+- The Set Height brush paints straight across joined edges; outer edges stay locked. **Rebuild All Skies** after
   painting terrain higher than the sky.
 - **Paint Height** (Set Height brush): type a height and paint toward it. Ctrl+click picks the
   height under the cursor, [ ] change the radius, right-click or Esc to finish. Borders stay locked.
