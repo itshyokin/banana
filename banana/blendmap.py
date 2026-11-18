@@ -515,6 +515,21 @@ class BANANA_OT_unique_terrain_material(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class BANANA_OT_reset_layer_colors(bpy.types.Operator):
+    """Set the four layer preview colors to red, green, blue and black"""
+    bl_idname = "banana.reset_layer_colors"
+    bl_label = "Reset Colors"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        bsp = context.scene.banana.active_bsp
+        if bsp is None:
+            return {'CANCELLED'}
+        for n, color in LAYER_COLORS.items():
+            setattr(bsp.banana, "layer%d_color" % n, color)
+        return {'FINISHED'}
+
+
 class BANANA_OT_save_blend_map(bpy.types.Operator):
     """Turn the painted vertex colors into the RGBA blend map TIFF in your level's bitmaps folder"""
     bl_idname = "banana.save_blend_map"
@@ -562,6 +577,7 @@ class BANANA_PT_blend(bpy.types.Panel):
         row = layout.row(align=True)
         row.prop(b, "blend_resolution")
         row.operator("banana.blend_setup", text="", icon='UV').refit = False
+        row.operator("banana.reset_layer_colors", text="", icon='COLOR')
 
         painting = context.mode == 'PAINT_VERTEX'
         for n, label in ((1, "1 Red (R)"), (2, "2 Green (G)"), (3, "3 Blue (B)"), (4, "4 Black (A)")):
@@ -586,7 +602,7 @@ class BANANA_PT_blend(bpy.types.Panel):
 
 
 CLASSES = (BANANA_OT_blend_setup, BANANA_OT_paint_blend, BANANA_OT_fill_layer, BANANA_OT_done_painting,
-           BANANA_OT_unique_terrain_material, BANANA_OT_save_blend_map, BANANA_PT_blend)
+           BANANA_OT_unique_terrain_material, BANANA_OT_reset_layer_colors, BANANA_OT_save_blend_map, BANANA_PT_blend)
 
 
 def register():

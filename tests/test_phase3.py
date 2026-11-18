@@ -269,6 +269,21 @@ def test_blend_edge_and_paint_across():
         check(not errors(validate.validate_bsp(ctx, bsp)), "%s sealed after painting across" % bsp.name)
 
 
+def test_near_duplicate_vertices():
+    print("Validate catches vertices that Tool would merge into degenerate triangles")
+    s = reset()
+    ctx = bpy.context
+    select(None)
+    bpy.ops.banana.new_terrain('EXEC_DEFAULT', name="nd", size_x=20, size_y=20, spacing=2, next_to_selected=False)
+    t = ctx.active_object
+    check(not errors(validate.validate_bsp(ctx, s.active_bsp)), "fresh terrain is clean")
+    i = [v.index for v in t.data.vertices if abs(v.co.x) < 1e-6 and abs(v.co.y) < 1e-6][0]
+    t.data.vertices[i].co.x += 1.9995
+    t.data.update()
+    errs = errors(validate.validate_bsp(ctx, s.active_bsp))
+    check(any("almost on top" in e[1] and e[2] == t.name for e in errs), "near-duplicate pair reported on the terrain")
+
+
 def test_height_dab():
     print("set height brush math")
     reset()
@@ -395,6 +410,7 @@ if __name__ == "__main__":
     test_selection_via_shell()
     test_fine_spacing_seam()
     test_blend_edge_and_paint_across()
+    test_near_duplicate_vertices()
     test_height_dab()
     test_blend_vertex_paint()
     test_convert_old_layers()

@@ -7,6 +7,7 @@ from . import bsp as bsp_mod, naming
 from .export import material_name
 
 DEBUG_NAME = "BANANA_PROBLEMS"
+SLIVER_RATIO = 1e-4  # triangle area / longest edge^2 below this counts as a sliver
 DEBUG_COLLECTION = "Banana Debug"
 
 # world-space edge segments per BSP, for drawing the problem overlay
@@ -67,6 +68,27 @@ def check_structure(context, bsp, objs, res):
         bm.free()
         return
 
+    # vertices *almost* on top of each other: Tool merges them and the triangles between them
+    # collapse ("triangle was degenerate"). Exactly-shared positions (object joins) are fine.
+    from mathutils.kdtree import KDTree
+    near = 0.1 / scale  # 0.1 ASS units, about 3 mm
+    tree = KDTree(len(bm.verts))
+    for i, v in enumerate(bm.verts):
+        tree.insert(v.co, i)
+    tree.balance()
+    bm.verts.ensure_lookup_table()
+    close = {}
+    for i, v in enumerate(bm.verts):
+        for co, j, dist in tree.find_range(v.co, near):
+            if j > i and dist > 1e-6:
+                face = v.link_faces[0] if v.link_faces else None
+                name = objs[face[src]].name if face is not None else ""
+                close[name] = close.get(name, 0) + 1
+                res.edges.append((tuple(v.co), tuple(co)))
+    for name, count in close.items():
+        res.add('ERROR', "%d vertex pairs almost on top of each other (Tool merges them into degenerate triangles)"
+                % count, name, count)
+
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=weld)
 
     def owner(edge):
@@ -88,8 +110,15 @@ def check_structure(context, bsp, objs, res):
     if loose:
         res.add('WARNING', "%d loose edges with no faces (ignored by export)" % len(loose))
 
+    # Tool works on triangles: check them, including thin slivers (not just zero area)
+    tris = bmesh.ops.triangulate(bm, faces=bm.faces[:], quad_method='BEAUTY', ngon_method='BEAUTY')
     tiny = weld * weld * 0.5
-    degenerate = [f for f in bm.faces if f.calc_area() < tiny]
+    degenerate = []
+    for f in bm.faces:
+        area = f.calc_area()
+        longest = max(e.calc_length() for e in f.edges)
+        if area < tiny or area < SLIVER_RATIO * longest * longest:
+            degenerate.append(f)
     for f in degenerate:
         for e in f.edges:
             res.edges.append((tuple(e.verts[0].co), tuple(e.verts[1].co)))
@@ -97,7 +126,7 @@ def check_structure(context, bsp, objs, res):
     for f in degenerate:
         per_obj[objs[f[src]].name] = per_obj.get(objs[f[src]].name, 0) + 1
     for name, count in per_obj.items():
-        res.add('ERROR', "%d degenerate (zero-area) faces" % count, name, count)
+        res.add('ERROR', "%d degenerate or sliver triangles (Tool: 'triangle was degenerate')" % count, name, count)
 
     seen = {}
     dupes = 0
