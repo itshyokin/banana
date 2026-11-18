@@ -103,8 +103,9 @@ user's real Reach + Halo 3 Elite node lists to tune auto-matching.
   sides) gave "unpaired seam" in Sapien. Banana now rewrites every `+seam...` material to
   `+seam:<BSP file name>` on export, so the Blender material name doesn't matter; pairing is
   validated by geometry (identical triangles in exactly one other BSP, opposite facing).
-- **Automatic seams:** a border edge that exactly matches another BSP's border edge (rounded to
-  1e-4) makes `+seam` walls. Wall triangles always use the
+- **Seams are only made on request** (Generate Seam, or `build_sky_shell(auto_seams=True)`): a
+  border edge that exactly matches the partner BSP's border edge (rounded to 1e-4) gets
+  `+seam:<own bsp>` walls. Rebuilding shells keeps existing seams only. Wall triangles always use the
   diagonal from the lexicographically lower vertex, so both BSPs produce identical triangles;
   each side faces into its own BSP (Microsoft docs: matching seams need the same triangulation,
   coincident vertices, opposite normals, normals pointing into the BSP).
@@ -178,6 +179,15 @@ tools/build_zip.py     builds dist/banana-<version>.zip for Install Add-on
 - Also avoid creating/removing datablocks while holding evaluated objects (append with
   `bm.from_mesh` + `bmesh.ops.transform` instead of `mesh.copy()`), and read evaluated meshes via
   `to_mesh()`/`to_mesh_clear()` rather than `eval_obj.data` (Edit Mode safety).
+- **v0.5.4 (root cause of the extra unpaired seam):** the sky shell was often what got clicked,
+  so New Terrain didn't see a terrain selected, silently unticked "Next to Selected" and put the
+  new tile at the origin *under* the first one. Generate Seam then rebuilt shells against *every*
+  touching BSP, so the hidden duplicate turned the first terrain's whole outer wall into a seam
+  with no partner. Fixes: any object in a terrain BSP stands for its terrain (`terrain_for`);
+  shells are `hide_select`; the New Terrain dialog shows which terrain it's next to; Generate Seam
+  seams only the selected pair + BSPs it's already seamed to (`existing_seam_partners`); Rebuild
+  Sky Shells keeps exactly the existing seams (`auto_seams` off by default); overlapping terrains
+  are refused by Generate Seam and reported by Validate (`check_overlaps`).
 - **v0.5.2:** user saw an extra "unpaired seam" next to a working terrain seam. A simulated
   workflow (hills near the edge, Generate Seam, Export All) gives byte-identical seam triangles in
   both .ass files, one seam material per side, no duplicates — so suspect leftover .ass files in

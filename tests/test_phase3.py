@@ -120,6 +120,56 @@ def test_terrain_bsps():
     check(not sky.check_seams(ctx, [a, b, c]), "A keeps its seam with B after joining C")
 
 
+def test_selection_via_shell():
+    print("New Terrain / Generate Seam work when the sky shell (or anything in the BSP) is selected")
+    s = reset()
+    ctx = bpy.context
+    select(None)
+    bpy.ops.banana.new_terrain('EXEC_DEFAULT', name="t0", size_x=100, size_y=100, spacing=2, next_to_selected=False)
+    t0 = ctx.active_object
+    shell = [o for o in bsp_mod.objects_for_role(s.active_bsp, 'STRUCTURE') if o.get(sky.SHELL_KEY)][0]
+    check(shell.hide_select, "sky shells can't be clicked")
+    shell.hide_select = False  # simulate an old file where the shell was selectable
+    select(shell)
+    for side, expect in (('+X', (100, 0)), ('-X', (-100, 0)), ('+Y', (0, 100)), ('-Y', (0, -100))):
+        select(shell)
+        bpy.ops.banana.new_terrain('EXEC_DEFAULT', name="t_%s" % side, next_to_selected=True, side=side)
+        loc = ctx.active_object.location
+        check(abs(loc.x - expect[0]) < 1e-6 and abs(loc.y - expect[1]) < 1e-6 and abs(loc.z) < 1e-6,
+              "side %s lands at %s (got %.1f, %.1f, %.1f)" % (side, expect, loc.x, loc.y, loc.z))
+    east = bpy.data.objects["t_+X_ground"]
+    select(shell, east)
+    bpy.ops.banana.generate_seam()
+    a, b = bsp_mod.bsp_of(t0, ctx.scene), bsp_mod.bsp_of(east, ctx.scene)
+    everyone = bsp_mod.find_bsps(ctx.scene)
+    check(len(sky.seam_triangles(ctx, a)) == 100 and not sky.check_seams(ctx, everyone),
+          "seam only between the two selected; the other touching terrains get no unpaired seam")
+    for bsp in everyone:
+        check(not errors(validate.validate_bsp(ctx, bsp)), "%s sealed" % bsp.name)
+
+    # an existing seam survives joining a second neighbor
+    north = bpy.data.objects["t_+Y_ground"]
+    select(t0, north)
+    bpy.ops.banana.generate_seam()
+    c = bsp_mod.bsp_of(north, ctx.scene)
+    check(len(sky.seam_triangles(ctx, a)) == 200 and not sky.check_seams(ctx, everyone), "A keeps its east seam and gains a north one")
+    bpy.ops.banana.build_sky_shell(all_bsps=True)
+    check(len(sky.seam_triangles(ctx, a)) == 200 and not sky.check_seams(ctx, everyone),
+          "Rebuild All Skies keeps exactly the seams made with Generate Seam")
+
+    # overlapping terrains are refused and reported
+    select(None)
+    bpy.ops.banana.new_terrain('EXEC_DEFAULT', name="dup", size_x=100, size_y=100, spacing=2, next_to_selected=False)
+    dup = ctx.active_object
+    select(t0, dup)
+    try:
+        bpy.ops.banana.generate_seam()
+        check(False, "overlapping terrains refused")
+    except RuntimeError as err:
+        check("overlap" in str(err), "overlapping terrains refused")
+    check(any("overlap" in m for _s, m, _b in sky.check_overlaps(ctx, bsp_mod.find_bsps(ctx.scene))), "Validate reports the overlap")
+
+
 def test_fine_spacing_seam():
     print("generate seam on 1 m terrain doesn't collapse vertices")
     s = reset()
@@ -217,6 +267,7 @@ def test_blend_brush_and_preview():
 
 if __name__ == "__main__":
     test_terrain_bsps()
+    test_selection_via_shell()
     test_fine_spacing_seam()
     test_height_dab()
     test_blend_brush_and_preview()

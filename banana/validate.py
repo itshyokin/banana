@@ -253,7 +253,7 @@ class BANANA_OT_validate(bpy.types.Operator):
         results = [validate_bsp(context, b) for b in bsps]
         by_name = {r.bsp.name: r for r in results}
         everyone = bsp_mod.find_bsps(context.scene)
-        for severity, message, bsp_name in sky.check_seams(context, everyone) + sky.check_border_alignment(context, everyone):
+        for severity, message, bsp_name in sky.check_seams(context, everyone) + sky.check_border_alignment(context, everyone) + sky.check_overlaps(context, everyone):
             if bsp_name in by_name:
                 by_name[bsp_name].add(severity, message)
         store_results(context.scene, results)

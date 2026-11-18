@@ -34,6 +34,17 @@ def terrain_of(bsp):
     return None
 
 
+def terrain_for(obj, scene):
+    """The terrain tile an object stands for: itself, or the terrain of the BSP it belongs to
+    (so clicking a sky shell, prop or anything else in a terrain BSP picks that terrain)."""
+    if obj is None:
+        return None
+    if is_terrain(obj):
+        return obj
+    bsp = bsp_mod.bsp_of(obj, scene)
+    return terrain_of(bsp) if bsp is not None else None
+
+
 def all_terrain(scene):
     out = []
     for bsp in bsp_mod.find_bsps(scene):
@@ -114,10 +125,17 @@ def safe_tolerance(a, b, wanted):
 
 def _two_terrains(context):
     """(active terrain, other terrain) from the selection, in two different BSPs."""
-    active = context.active_object
-    picked = [o for o in context.selected_objects if is_terrain(o)]
-    if not is_terrain(active) or len(picked) != 2:
-        return None, None, "Select two terrain tiles (the active one is kept as is)"
+    active = terrain_for(context.active_object, context.scene)
+    picked = []
+    for obj in context.selected_objects:
+        t = terrain_for(obj, context.scene)
+        if t is not None and t not in picked:
+            picked.append(t)
+    if active is None or active not in picked:
+        if active is not None:
+            picked.insert(0, active)
+    if active is None or len(picked) != 2:
+        return None, None, "Select two terrains in two different BSPs (the active one is kept as is)"
     other = picked[0] if picked[1] is active else picked[1]
     a_bsp = bsp_mod.bsp_of(active, context.scene)
     b_bsp = bsp_mod.bsp_of(other, context.scene)
@@ -152,20 +170,35 @@ class BANANA_OT_new_terrain(bpy.types.Operator):
 
     def invoke(self, context, event):
         self.name = self._default_name(context)
-        active = context.active_object
-        if is_terrain(active):
+        active = terrain_for(context.active_object, context.scene)
+        if active is not None:
             info = active[TILE_KEY]
             self.size_x, self.size_y, self.spacing = info["size_x"], info["size_y"], info["spacing"]
+            self.next_to_selected = True
         else:
             self.next_to_selected = False
         return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "name")
+        neighbor = terrain_for(context.active_object, context.scene)
+        row = layout.row()
+        row.enabled = neighbor is not None
+        row.prop(self, "next_to_selected", text="Next to %s" % neighbor.name if neighbor else "Next to Selected Terrain (none selected)")
+        if self.next_to_selected and neighbor is not None:
+            layout.prop(self, "side", expand=True)
+            layout.label(text="Size and spacing are matched along the shared edge", icon='INFO')
+        layout.prop(self, "size_x")
+        layout.prop(self, "size_y")
+        layout.prop(self, "spacing")
 
     def execute(self, context):
         from . import sky
         if context.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
-        neighbor = context.active_object if self.next_to_selected else None
-        if neighbor is not None and not is_terrain(neighbor):
+        neighbor = terrain_for(context.active_object, context.scene) if self.next_to_selected else None
+        if self.next_to_selected and neighbor is None:
             self.report({'ERROR'}, "Select a terrain to place the new one next to, or untick Next to Selected Terrain")
             return {'CANCELLED'}
         location = Vector((0.0, 0.0, 0.0))
@@ -254,11 +287,19 @@ class BANANA_OT_generate_seam(bpy.types.Operator):
             s.sky_height = sky.auto_sky_height(context)
         weld = 0.01 / s.scale()
         everyone = bsp_mod.find_bsps(context.scene)
-        keys = {x.name: sky.border_edge_keys(context, x, weld) for x in everyone}
+        overlaps = sky.check_overlaps(context, [a, b])
+        if overlaps:
+            self.report({'ERROR'}, overlaps[0][1])
+            return {'CANCELLED'}
         lines = []
-        # rebuild both against every neighbor they touch, so their other seams survive
+        # each side seams with the other one, plus any BSP it's already seamed to (so those
+        # seams survive); never with other touching BSPs whose shells still have sky walls there
+        plans = {}
+        for bsp, partner in ((a, b), (b, a)):
+            others = [o for o in everyone if o is not bsp and o is not partner]
+            plans[bsp.name] = [partner] + sky.existing_seam_partners(context, bsp, others, weld)
         for bsp in (a, b):
-            neighbors = [(o, keys[o.name]) for o in everyone if o is not bsp]
+            neighbors = [(o, sky.border_edge_keys(context, o, weld)) for o in plans[bsp.name]]
             _obj, msgs = sky.build_shell(context, bsp, s.sky_height, neighbors)
             lines.extend(msgs)
         problems = [m for sev, m in lines if sev == 'ERROR']

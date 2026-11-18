@@ -79,7 +79,7 @@ def test_single_shell():
     res = validate.validate_bsp(ctx, bsp)
     check(any("open edges" in e[1] for e in errors(res)), "open terrain fails validation first")
 
-    check(bpy.ops.banana.build_sky_shell(all_bsps=True) == {'FINISHED'}, "build sky shell runs")
+    check(bpy.ops.banana.build_sky_shell(all_bsps=True, auto_seams=True) == {'FINISHED'}, "build sky shell runs")
     shell = [o for o in bsp_mod.objects_for_role(bsp, 'STRUCTURE') if o.get(sky.SHELL_KEY)]
     check(len(shell) == 1, "one shell object")
     check(abs(s.sky_height - (1.6 + 30.0)) < 1e-4, "auto sky height 30 m above the top of the terrain (%s)" % s.sky_height)
@@ -93,7 +93,7 @@ def test_single_shell():
     text = open(written[0], encoding="utf-8").read()
     check('"+sky0"' in text, "+sky exports as +sky0")
 
-    bpy.ops.banana.build_sky_shell(all_bsps=True)
+    bpy.ops.banana.build_sky_shell(all_bsps=True, auto_seams=True)
     check(len([o for o in bsp_mod.objects_for_role(bsp, 'STRUCTURE') if o.get(sky.SHELL_KEY)]) == 1, "rebuilding replaces the old shell")
 
 
@@ -105,7 +105,7 @@ def test_two_bsps_seam():
     b = bsp_mod.create_bsp(ctx.scene, "bsp_b")
     terrain("ground_a", a, -20, 0)
     terrain("ground_b", b, 0, 20)
-    bpy.ops.banana.build_sky_shell(all_bsps=True)
+    bpy.ops.banana.build_sky_shell(all_bsps=True, auto_seams=True)
     for bsp in (a, b):
         res = validate.validate_bsp(ctx, bsp)
         check(not errors(res), "%s sealed: %s" % (bsp.name, errors(res)))
@@ -123,7 +123,7 @@ def test_two_bsps_seam():
     g = bpy.data.objects["ground_b"]
     g.data.vertices[9 * 4].co.x += 0.3  # first column of row 4 sits on x = 0
     try:
-        bpy.ops.banana.build_sky_shell(all_bsps=True)
+        bpy.ops.banana.build_sky_shell(all_bsps=True, auto_seams=True)
         check(False, "shell build reports the misaligned border")
     except RuntimeError as err:  # error reports raise in background mode
         check("line up" in str(err), "shell build reports the misaligned border")

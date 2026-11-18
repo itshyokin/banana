@@ -106,6 +106,38 @@ def border_verts(context, bsp, weld):
     return pts
 
 
+def existing_seam_partners(context, bsp, others, weld):
+    """BSPs that already have seam faces sitting on this BSP's border."""
+    border = {_round(p) for p in border_verts(context, bsp, weld)}
+    partners = []
+    for other in others:
+        for key in seam_triangles(context, other):
+            if sum(1 for p in key if p in border) >= 2:
+                partners.append(other)
+                break
+    return partners
+
+
+def check_overlaps(context, bsps):
+    """Terrain BSPs lying on top of each other (e.g. a tile created in the same spot)."""
+    from . import terrain
+    boxes = []
+    for b in bsps:
+        t = terrain.terrain_of(b)
+        if t is None:
+            continue
+        pts = [t.matrix_world @ Vector(c) for c in t.bound_box]
+        boxes.append((b.name, min(p.x for p in pts), max(p.x for p in pts), min(p.y for p in pts), max(p.y for p in pts)))
+    out = []
+    for i, (an, ax0, ax1, ay0, ay1) in enumerate(boxes):
+        for bn, bx0, bx1, by0, by1 in boxes[i + 1:]:
+            ox = min(ax1, bx1) - max(ax0, bx0)
+            oy = min(ay1, by1) - max(ay0, by0)
+            if ox > 1e-3 and oy > 1e-3:
+                out.append(('ERROR', "Terrains of %s and %s overlap (%.0f x %.0f m); move or delete one" % (an, bn, ox, oy), an))
+    return out
+
+
 def check_border_alignment(context, bsps):
     """Terrain borders that nearly meet another BSP's border but don't line up exactly
     get plain +sky walls instead of seams, leaving the BSPs unconnected there."""
@@ -251,6 +283,7 @@ def build_shell(context, bsp, sky_height, neighbors):
     obj[SHELL_KEY] = True
     target.objects.link(obj)
     obj.display_type = 'WIRE'
+    obj.hide_select = True  # generated; keep clicks going to the terrain underneath
     msgs.append(('INFO', "%s: sky shell built (%d seam wall segments)" % (bsp.name, seam_count)))
     return obj, msgs
 
@@ -262,6 +295,9 @@ class BANANA_OT_build_sky_shell(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     all_bsps: bpy.props.BoolProperty(name="All BSPs", default=True)
+    auto_seams: bpy.props.BoolProperty(
+        name="Auto Seams", default=False,
+        description="Also turn every exactly-shared edge into a seam. Off: only keep the seams made with Generate Seam")
 
     def execute(self, context):
         if context.mode != 'OBJECT':
@@ -276,12 +312,18 @@ class BANANA_OT_build_sky_shell(bpy.types.Operator):
         weld = 0.01 / s.scale()
         everyone = bsp_mod.find_bsps(context.scene)
         keys = {b.name: border_edge_keys(context, b, weld) for b in everyone}
+        # decide every BSP's seam partners before any shell is replaced
+        plans = {}
+        for bsp in bsps:
+            others = [o for o in everyone if o is not bsp]
+            plans[bsp.name] = others if self.auto_seams else existing_seam_partners(context, bsp, others, weld)
         lines = []
         for bsp in bsps:
-            neighbors = [(o, keys[o.name]) for o in everyone if o is not bsp]
+            neighbors = [(o, keys[o.name]) for o in plans[bsp.name]]
             _obj, msgs = build_shell(context, bsp, s.sky_height, neighbors)
             lines.extend(msgs)
         lines.extend((sev, msg) for sev, msg, _b in check_border_alignment(context, everyone))
+        lines.extend((sev, msg) for sev, msg, _b in check_overlaps(context, everyone))
         errors = [m for sev, m in lines if sev == 'ERROR']
         for m in errors[:5]:
             self.report({'ERROR'}, m)

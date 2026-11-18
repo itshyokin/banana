@@ -78,7 +78,7 @@ class BANANA_PT_bsps(BananaPanel, bpy.types.Panel):
         sub.enabled = not s.sky_height_auto
         sub.prop(s, "sky_height", text="")
         row = box.row(align=True)
-        row.operator("banana.build_sky_shell", text="Build Sky Shells", icon='MESH_CUBE').all_bsps = True
+        row.operator("banana.build_sky_shell", text="Rebuild Sky Shells", icon='MESH_CUBE').all_bsps = True
         row.operator("banana.build_sky_shell", text="This BSP").all_bsps = False
         box.operator("banana.mirror_seam", icon='MOD_MIRROR')
 
