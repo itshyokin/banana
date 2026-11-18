@@ -142,6 +142,12 @@ user's real Reach + Halo 3 Elite node lists to tune auto-matching.
   Overlay: SpaceView3D POST_PIXEL blf text, toggle in the Limits panel.
 - ✅ Verified in Tool/Sapien (2026-11-17): two rooms joined by a mirrored doorway seam pair up
   (after the per-BSP seam naming fix).
+- ✅ Verified (2026-11-17, v0.8.0): Set Height brush, vertex-paint blending with preview
+  textures, per-BSP terrain materials and the baked blend map all work in Blender and in-game.
+  Open item: Sapien reported "triangle #1382 was degenerate (this may cause open edges)" — likely
+  long sliver triangles from the sky shell's BEAUTY-triangulated cap (many collinear border
+  vertices). Proposed fix: build the cap for tile terrains as a grid of quads at sky height (same
+  XY as the terrain grid), and tighten Validate's degenerate check to catch slivers.
 - ✅ Verified (2026-11-17): two terrain BSPs with Generate Seam + blended edge load and connect,
   once the Tool order was right. Possible next step offered to the user: make "Run Tool After
   Export" run structure-seams first and then re-import every BSP automatically.
